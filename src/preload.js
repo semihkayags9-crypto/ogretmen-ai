@@ -18,5 +18,11 @@ contextBridge.exposeInMainWorld('ogretmenAPI', {
   saveApiKey: (apiKey) => ipcRenderer.invoke('settings:save-api-key', apiKey),
   // Bir sablonun denendigini/tamamlandigini kalici cocuk-profiline bildirir
   // (kind: 'attempt' | 'completed'). AI cagirmaz, aninda/ucretsiz.
-  reportTemplateProgress: (templateId, kind) => ipcRenderer.invoke('progress:template-event', templateId, kind)
+  reportTemplateProgress: (templateId, kind) => ipcRenderer.invoke('progress:template-event', templateId, kind),
+  // Kaydedilmis bir ses parcasini (ArrayBuffer) Groq Whisper ile metne cevirir.
+  // Electron'un icindeki ciplak Chromium'da webkitSpeechRecognition GUVENILIR
+  // CALISMIYOR (Google'in bulut konusma servisi icin gereken API anahtari
+  // ciplak Chromium'da yok) - bunun yerine gercek ses kaydedilip Groq'un
+  // /audio/transcriptions ucuna gonderiliyor.
+  transcribeAudio: (arrayBuffer, mimeType, language) => ipcRenderer.invoke('audio:transcribe', arrayBuffer, mimeType, language)
 });

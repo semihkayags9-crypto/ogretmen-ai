@@ -62,6 +62,10 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  // Guvenlik agi: yarim kalan bir oturumun (henuz AI-ozetlenmemis bile olsa
+  // templateProgress gibi) bellekte biriken hali kapanista da diske yazilsin -
+  // "hafiza problemi" sikayetinin bir parcasi da buydu.
+  saveChildProfile(childProfile);
   if (updateReadyToInstall) {
     autoUpdater.quitAndInstall();
     return;
@@ -242,9 +246,13 @@ function buildSystemPrompt() {
 let conversationHistory = [];
 const MAX_HISTORY = 20; // son 20 mesaj (10 soru-cevap) hatirlanir
 
-// Her kac mesajda bir cocuk-profili AI ile yenilensin. Kucuk tutuldu (ucretsiz
-// katman/hiz icin) ama cocugun "tanindigini" hissetmesi icin yeterince sik.
-const PROFILE_REFRESH_EVERY = 6;
+// Her kac mesajda bir cocuk-profili AI ile yenilensin. GERCEKTEN yasandi:
+// 6 idi - cogu gercek deneme/oturum 6 mesaja hic ulasmiyordu, yani profil
+// ASLA diske yazilmiyordu ("kapatip tekrar acinca hicbir sey hatirlamiyor"
+// sikayeti buradan geliyordu). 2'ye indirildi - conversationHistory.length>=4
+// sarti zaten en az 2 gercek karsilikli konusma garanti ediyor, kisa bir
+// denemede bile profil diske yazilsin diye.
+const PROFILE_REFRESH_EVERY = 2;
 let messagesSinceProfileRefresh = 0;
 
 // Profili GUNCELLER - ana sohbet cevabini ASLA BEKLETMEZ (fire-and-forget,
@@ -351,6 +359,42 @@ ipcMain.handle('ai:ask', async (event, userText) => {
   } catch (err) {
     console.error('Groq baglanti hatasi:', err);
     return 'Internete baglanamadim galiba. Baglantini kontrol edip tekrar dene.';
+  }
+});
+
+// ---------------------------------------------------------------
+// SES -> METIN (Groq Whisper) - GERCEKTEN yasandi: Electron'un icindeki
+// ciplak Chromium'da webkitSpeechRecognition (tarayici SpeechRecognition API'si)
+// GUVENILIR CALISMIYOR - Google'in bulut konusma servisine erismek icin
+// gereken API anahtari gercek Chrome'da var, ciplak Chromium'da (Electron'un
+// kullandigi) YOK. Sonuc: sessizce "network" hatasi verip sonsuza kadar
+// yeniden deniyor, cocuk konusuyor ama hicbir sey olmuyordu. Bunun yerine
+// renderer gercek sesi kaydedip (MediaRecorder) buraya gonderiyor, biz de
+// ZATEN kullandigimiz Groq anahtariyla /audio/transcriptions'a yolluyoruz -
+// yeni bir anahtar/servis gerekmiyor.
+// ---------------------------------------------------------------
+ipcMain.handle('audio:transcribe', async (event, arrayBuffer, mimeType, language) => {
+  if (!GROQ_API_KEY) return { ok: false, text: '' };
+  try {
+    const form = new FormData();
+    form.append('file', new Blob([arrayBuffer], { type: mimeType || 'audio/webm' }), 'ses.webm');
+    form.append('model', 'whisper-large-v3-turbo');
+    if (language) form.append('language', language); // 'tr' | 'en'
+    const response = await fetch('https://api.groq.com/openai/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${GROQ_API_KEY}` },
+      body: form
+    });
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error('Groq ses-yaziya-cevirme hatasi:', response.status, errText);
+      return { ok: false, text: '' };
+    }
+    const data = await response.json();
+    return { ok: true, text: (data.text || '').trim() };
+  } catch (e) {
+    console.error('Ses yazıya çevrilemedi:', e.message);
+    return { ok: false, text: '' };
   }
 });
 

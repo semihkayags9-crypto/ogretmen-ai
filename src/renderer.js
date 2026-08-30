@@ -333,6 +333,58 @@ const TEMPLATES = [
     goal: null,
     hint: 'Hedef yok, istediğin gibi deneme yapabilirsin.',
     hintEn: 'No goal here — try anything you like.'
+  },
+  {
+    id: 'cift-kose',
+    name: '6) Çift Köşe — S Yolu',
+    nameEn: '6) Double Turn — S Path',
+    cols: 8, rows: 6,
+    start: { x: 1, y: 1, angle: 0 },
+    goal: { x: 2, y: 3 },
+    hint: 'Bu sefer İKİ köşe var: önce ileri git, dön, tekrar ileri git, tekrar dön, sonra ileri git.',
+    hintEn: 'This time there are TWO corners: move forward, turn, move forward again, turn again, then move forward.'
+  },
+  {
+    id: 'uzun-tekrar',
+    name: '7) Uzun Tekrar — Büyük Yol',
+    nameEn: '7) Long Repeat — Big Road',
+    cols: 10, rows: 6,
+    start: { x: 0, y: 2, angle: 0 },
+    goal: { x: 9, y: 2 },
+    hint: 'Bu yol çok uzun — tek tek "ileri git" eklemek yerine "N kere tekrarla" bloğunun içine bir "ileri git" koy.',
+    hintEn: 'This road is very long — instead of adding "move forward" one by one, put a single "move forward" inside a "repeat N times" block.'
+  },
+  {
+    id: 'cifte-engel',
+    name: '8) Çifte Engel — İki Kere Zıpla',
+    nameEn: '8) Double Obstacle — Jump Twice',
+    cols: 8, rows: 6,
+    start: { x: 0, y: 3, angle: 0 },
+    goal: { x: 7, y: 3 },
+    obstacles: [{ x: 2, y: 3 }, { x: 5, y: 3 }],
+    hint: 'Yolda İKİ engel var — her birinin tam önünde "zıpla" bloğunu kullanman gerekiyor.',
+    hintEn: 'There are TWO obstacles on the road — use the "jump" block right in front of each one.'
+  },
+  {
+    id: 'kare-tur',
+    name: '9) Kare Tur — Başladığın Yere Dön',
+    nameEn: '9) Square Tour — Back to Start',
+    cols: 8, rows: 6,
+    start: { x: 1, y: 1, angle: 0 },
+    goal: { x: 1, y: 1 },
+    hint: '"N kere tekrarla" bloğunun içine "ileri git, ileri git, dön" koy ve 4 kere tekrarlat — kare çizip başladığın yere dönersin.',
+    hintEn: 'Put "move forward, move forward, turn" inside a "repeat N times" block set to 4 — you\'ll draw a square and return to where you started.'
+  },
+  {
+    id: 'zipla-don-karisik',
+    name: '10) Zıpla + Dön Karışık Parkur',
+    nameEn: '10) Mixed Jump + Turn Course',
+    cols: 8, rows: 6,
+    start: { x: 1, y: 1, angle: 0 },
+    goal: { x: 1, y: 4 },
+    obstacles: [{ x: 3, y: 3 }],
+    hint: 'Hem "dön" hem "zıpla" bloğuna ihtiyacın olacak — önce köşeyi dön, sonra engelin önünde zıpla, sonra tekrar dön.',
+    hintEn: 'You\'ll need both "turn" and "jump" — turn the corner first, then jump in front of the obstacle, then turn again.'
   }
 ];
 
@@ -379,12 +431,13 @@ function drawScene() {
     ctx.stroke();
   }
 
-  // engel
-  if (currentTemplate.obstacle) {
+  // engel(ler)
+  const obstacles = templateObstacles(currentTemplate);
+  if (obstacles.length > 0) {
     ctx.font = `${cs * 0.7}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('🧱', currentTemplate.obstacle.x * cs + cs / 2, currentTemplate.obstacle.y * cs + cs / 2);
+    for (const o of obstacles) ctx.fillText('🧱', o.x * cs + cs / 2, o.y * cs + cs / 2);
   }
 
   // hedef bayrağı
@@ -450,6 +503,15 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Bazi sablonlarda TEK engel (obstacle: {x,y}), bazilarinda BIRDEN FAZLA
+// engel (obstacles: [{x,y}, ...]) olabilir - eskiyle geriye donuk uyumlu
+// tek bir liste dondurur, tum engel kontrolleri buradan gecer.
+function templateObstacles(tpl) {
+  if (Array.isArray(tpl.obstacles)) return tpl.obstacles;
+  if (tpl.obstacle) return [tpl.obstacle];
+  return [];
+}
+
 function angleToDelta(angle) {
   switch (((angle % 360) + 360) % 360) {
     case 0: return { dx: 1, dy: 0 };
@@ -480,8 +542,7 @@ async function runBlock(block) {
       const nx = charState.x + dx;
       const ny = charState.y + dy;
       const inBounds = nx >= 0 && nx < currentTemplate.cols && ny >= 0 && ny < currentTemplate.rows;
-      const blockedByObstacle = currentTemplate.obstacle &&
-        currentTemplate.obstacle.x === nx && currentTemplate.obstacle.y === ny;
+      const blockedByObstacle = templateObstacles(currentTemplate).some((o) => o.x === nx && o.y === ny);
       if (!inBounds) {
         log(uiText('bumpLog'));
       } else if (blockedByObstacle) {
@@ -520,8 +581,8 @@ async function runBlock(block) {
       // Engelin tam onundeyse ve zipladiysa, engeli asip bir hucre ilerlet
       const { dx, dy } = angleToDelta(charState.angle);
       const ahead = { x: charState.x + dx, y: charState.y + dy };
-      if (currentTemplate.obstacle &&
-          currentTemplate.obstacle.x === ahead.x && currentTemplate.obstacle.y === ahead.y) {
+      const obstacleAhead = templateObstacles(currentTemplate).some((o) => o.x === ahead.x && o.y === ahead.y);
+      if (obstacleAhead) {
         charState.x = ahead.x + dx;
         charState.y = ahead.y + dy;
         log(uiText('jumpObstacleLog'));
@@ -671,7 +732,6 @@ function addMessage(text, who) {
 
 let voiceModeOn = false;   // sesli sohbet modu açık mı
 let isSpeaking = false;    // AI şu an TTS ile konuşuyor mu
-let recognition = null;
 let microphoneStream = null;
 let microphoneSetup = null;
 
@@ -697,6 +757,52 @@ async function prepareMicrophone() {
     });
   }
   return microphoneSetup;
+}
+
+// AnalyserNode ile basit enerji-tabanli ses aktivitesi algilama (VAD):
+// konusma baslayana kadar bekler, basladiktan sonra `silenceMs` boyunca
+// sessizlik olunca kaydi durdurur. `maxMs` bir ust sinir (cocuk konusmayi
+// hic birakmazsa). webkitSpeechRecognition'in yerini alan gercek ses
+// kaydi - hem ana dinleme hem uyandirma kelimesi bunu kullanir.
+async function recordUntilSilence({ maxMs = 8000, silenceMs = 1100, requireSpeechFirst = true, isCancelled = () => false } = {}) {
+  if (!await prepareMicrophone()) return null;
+  const audioCtx = new AudioContext();
+  const source = audioCtx.createMediaStreamSource(microphoneStream);
+  const analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 2048;
+  source.connect(analyser);
+  const data = new Uint8Array(analyser.frequencyBinCount);
+
+  const recorder = new MediaRecorder(microphoneStream, { mimeType: 'audio/webm;codecs=opus' });
+  const chunks = [];
+  recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+  const stopped = new Promise((resolve) => { recorder.onstop = resolve; });
+  recorder.start();
+
+  let heardSpeech = !requireSpeechFirst;
+  let lastLoudAt = performance.now();
+  const start = performance.now();
+  await new Promise((resolve) => {
+    function tick() {
+      analyser.getByteTimeDomainData(data);
+      let sumSq = 0;
+      for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sumSq += v * v; }
+      const rms = Math.sqrt(sumSq / data.length);
+      const now = performance.now();
+      if (rms > 0.02) { heardSpeech = true; lastLoudAt = now; }
+      const silentTooLong = heardSpeech && (now - lastLoudAt > silenceMs);
+      const maxedOut = (now - start) > maxMs;
+      if (silentTooLong || maxedOut || isCancelled()) { resolve(); return; }
+      requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  });
+
+  recorder.stop();
+  await stopped;
+  audioCtx.close();
+  if (!heardSpeech) return null;
+  return new Blob(chunks, { type: 'audio/webm' });
 }
 
 function detectSpeechLanguage(text) {
@@ -784,75 +890,54 @@ chatInput.addEventListener('keydown', (e) => {
   }
 });
 
-// Ses -> Metin (Windows Chromium'un yerleşik SpeechRecognition'ı;
-// internet bağlantısı gerektirebilir. Tam offline istenirse
-// ileride Vosk'a bağlanacak şekilde bu blok değiştirilebilir).
-if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-  const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SpeechRecognitionImpl();
-  recognition.lang = voiceLanguage;
-  recognition.continuous = false;   // her turda bir cümle bekleriz
-  recognition.interimResults = false;
-  recognition.maxAlternatives = 1;
-
-  recognition.onresult = (event) => {
-    const text = event.results[0][0].transcript;
-    if (text && text.trim()) {
-      sendToAI(text);
-    } else if (voiceModeOn) {
-      startListening(); // bir şey anlaşılmadıysa tekrar dinle
-    }
-  };
-
-  recognition.onerror = (event) => {
-    if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-      addMessage(uiText('micPermissionMsg2'), 'ai');
-      stopVoiceMode();
-      return;
-    }
-    // "no-speech" gibi hatalarda sesli mod açıksa sessizce tekrar dinle
-    if (voiceModeOn && event.error !== 'aborted') {
-      setTimeout(() => { if (voiceModeOn && !isSpeaking) startListening(); }, 500);
-    }
-  };
-
-  recognition.onend = () => {
-    micBtn.classList.remove('listening');
-  };
-} else {
-  micBtn.disabled = true;
-  micBtn.title = 'Bu ortamda sesli tanıma desteklenmiyor';
-}
-
+// Ses -> Metin: gercek ses kaydi (recordUntilSilence, yukarida) + Groq
+// Whisper (main.js'teki audio:transcribe). ONCEDEN tarayicinin
+// webkitSpeechRecognition'i kullaniliyordu - Electron'un icindeki ciplak
+// Chromium'da bu GUVENILIR CALISMIYOR (bkz. recordUntilSilence yorumu),
+// cocuk konusuyor ama hicbir sey olmuyordu. MediaRecorder/getUserMedia
+// Electron'da HER ZAMAN var, o yuzden mikrofon butonu artik hicbir zaman
+// "desteklenmiyor" diye kapatilmiyor.
 const voiceLangBtn = document.getElementById('voiceLangBtn');
 voiceLangBtn.addEventListener('click', () => {
   voiceLanguage = voiceLanguage === 'tr-TR' ? 'en-US' : 'tr-TR';
   try { localStorage.setItem('ogretmenai-voice-lang', voiceLanguage); } catch (e) {}
-  if (recognition) recognition.lang = voiceLanguage;
   applyUILanguage();
 });
 
 async function startListening() {
-  if (!recognition || isSpeaking || !voiceModeOn) return;
-  if (!await prepareMicrophone()) return;
   if (isSpeaking || !voiceModeOn) return;
-  try {
-    recognition.start();
-    micBtn.classList.add('listening');
-  } catch (e) {
-    // zaten calisiyorsa (InvalidStateError) sessizce yoksay
+  micBtn.classList.add('listening');
+  const blob = await recordUntilSilence({ maxMs: 8000, silenceMs: 1100, isCancelled: () => !voiceModeOn });
+  micBtn.classList.remove('listening');
+  if (!voiceModeOn) return; // bu sirada durduruldu
+
+  if (!blob) {
+    // konusma hic algilanmadi (sessizlik/erken iptal) - hala sesli moddaysak tekrar dinle
+    if (voiceModeOn) startListening();
+    return;
+  }
+
+  const buf = await blob.arrayBuffer();
+  const lang = voiceLanguage === 'tr-TR' ? 'tr' : 'en';
+  const result = await window.ogretmenAPI.transcribeAudio(buf, 'audio/webm', lang);
+  if (!voiceModeOn) return; // yaziya cevirirken kapatilmis olabilir
+
+  if (result && result.ok && result.text) {
+    sendToAI(result.text);
+  } else if (voiceModeOn) {
+    startListening(); // anlasilamadi, tekrar dinle
   }
 }
 
 function stopListening() {
-  if (!recognition) return;
-  try { recognition.stop(); } catch (e) {}
+  // recordUntilSilence kendi ici tick donguSunde isCancelled() ile
+  // voiceModeOn'u kontrol ediyor - burada ekstra bir seye gerek yok,
+  // bir sonraki animasyon karesinde kendiliginden durur.
   micBtn.classList.remove('listening');
 }
 
 // Mikrofon butonu artık "Sesli Sohbeti Başlat/Durdur" anahtarı
 micBtn.addEventListener('click', () => {
-  if (!recognition) return;
   if (voiceModeOn) {
     stopVoiceMode();
   } else {
@@ -887,61 +972,38 @@ function stopVoiceMode() {
 // Uygulama açıldığında hafif bir arka plan dinleyicisi sürekli
 // çalışır ve sadece "Aven" kelimesini dinler. Duyulduğu an
 // tam sesli sohbet moduna (yukarıdaki döngü) otomatik geçilir —
-// mikrofon butonuna basmaya gerek kalmaz.
+// mikrofon butonuna basmaya gerek kalmaz. ONCEDEN webkitSpeechRecognition
+// KULLANIYORDU (ayni GUVENILMEZ Electron sorunu, bkz. yukarisi) - artik
+// SUREKLI bulut cagrisi YAPMADAN (VAD yerel/ucretsiz) sadece konusma
+// algilaninca KISA bir kayit alip Groq Whisper'a soruyor.
 // ---------------------------------------------------------------
-let wakeRecognition = null;
 let wakeListenerActive = false;
 
-if (recognition) { // tarayıcı SpeechRecognition destekliyorsa
-  const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
-  wakeRecognition = new SpeechRecognitionImpl();
-  wakeRecognition.lang = 'tr-TR';
-  wakeRecognition.continuous = true;      // sürekli açık kalır
-  wakeRecognition.interimResults = true;  // kelimeyi bekletmeden yakala
-
-  wakeRecognition.onresult = (event) => {
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      const said = event.results[i][0].transcript.toLowerCase();
-      if (said.includes('aven')) {
+async function wakeLoop() {
+  while (wakeListenerActive) {
+    const blob = await recordUntilSilence({ maxMs: 3000, silenceMs: 700, isCancelled: () => !wakeListenerActive });
+    if (!wakeListenerActive) return;
+    if (blob) {
+      const buf = await blob.arrayBuffer();
+      const result = await window.ogretmenAPI.transcribeAudio(buf, 'audio/webm', 'tr');
+      if (!wakeListenerActive) return;
+      if (result && result.ok && result.text && result.text.toLowerCase().includes('aven')) {
         addMessage(uiText('wakeWordHeard'), 'ai');
         startVoiceMode();
         return;
       }
     }
-  };
-
-  // Tarayıcı SpeechRecognition'ı belirli bir süre sonra kendiliğinden
-  // durdurabiliyor -> hâlâ "uyanık bekleme" modundaysak otomatik yeniden başlat
-  wakeRecognition.onend = () => {
-    if (wakeListenerActive) {
-      try { wakeRecognition.start(); } catch (e) {}
-    }
-  };
-
-  wakeRecognition.onerror = () => {
-    if (wakeListenerActive) {
-      setTimeout(() => {
-        if (wakeListenerActive) { try { wakeRecognition.start(); } catch (e) {} }
-      }, 500);
-    }
-  };
+  }
 }
 
 async function startWakeListener() {
-  if (!wakeRecognition || voiceModeOn) return;
+  if (voiceModeOn || wakeListenerActive) return;
   wakeListenerActive = true;
-  if (!await prepareMicrophone()) {
-    wakeListenerActive = false;
-    return;
-  }
-  if (!wakeListenerActive || voiceModeOn) return;
-  try { wakeRecognition.start(); } catch (e) {}
+  wakeLoop();
 }
 
 function stopWakeListener() {
   wakeListenerActive = false;
-  if (!wakeRecognition) return;
-  try { wakeRecognition.stop(); } catch (e) {}
 }
 
 // Kaydedilmis dil tercihini TUM arayuze uygula (baslangicta bir kez).
