@@ -4,49 +4,250 @@
 // 4. Sohbet panelini (yazılı + sesli) AI köprüsüne bağlar
 
 // ---------------------------------------------------------------
+// 0. DİL (TR/EN) - kullanıcının açık isteği (2026-08-30): "İngilizceye
+// çevirdim ama yazılar hâlâ Türkçe" - önceden bu ayar SADECE mikrofonun
+// dinlediği dili kontrol ediyordu, şimdi TÜM sabit arayüz metnini
+// (butonlar, etiketler, blok adları, şablon adları) de kapsıyor. AI'nin
+// KENDİ cevapları zaten çocuğun yazdığı dile göre otomatik değişiyor
+// (main.js SYSTEM_PROMPT talimatı) - bu AYRI/EK bir katman, sadece
+// SABIT arayüz metnini kapsar, geçmiş sohbet mesajlarını GERİYE DÖNÜK
+// çevirmez (gerçek bir uygulamada da öyle olmaz).
+// ---------------------------------------------------------------
+let voiceLanguage = 'tr-TR';
+try { voiceLanguage = localStorage.getItem('ogretmenai-voice-lang') || 'tr-TR'; } catch (e) {}
+
+const UI_TEXT = {
+  'tr-TR': {
+    templateLabel: '🗺️ Şablon:',
+    runBtn: '▶ Çalıştır',
+    runHint: 'Blokları sürükleyip bırak, sonra Çalıştır\'a bas!',
+    noBlocks: 'Önce birkaç blok yerleştirmelisin!',
+    goalReachedMsg: '🎉 Hedefe ulaştın!',
+    goalReachedLog: '🎉 Hedefe ulaşıldı!',
+    bumpLog: '🚧 Karakter kenara çarptı, ilerleyemedi.',
+    obstacleAheadLog: '🧱 Önünde bir engel var — üstünden atlaman gerekebilir!',
+    forwardLog: '➡️  Karakter ileri gitti.',
+    turnLog: '🔄  Karakter döndü.',
+    jumpObstacleLog: '⬆️  Karakter zıplayıp engeli aştı!',
+    jumpLog: '⬆️  Karakter zıpladı!',
+    blockForward: 'ileri git',
+    blockForwardTooltip: 'Karakteri bir adım ileri hareket ettirir',
+    blockTurn: 'dön',
+    blockTurnTooltip: 'Karakteri döndürür',
+    blockJump: 'zıpla',
+    blockJumpTooltip: 'Karakteri zıplatır',
+    blockRepeatPrefix: 'şunu',
+    blockRepeatSuffix: 'kere tekrarla',
+    blockRepeatTooltip: 'İçindeki blokları belirtilen sayıda tekrarlar',
+    chatHeaderTitle: '🧑‍🏫 Öğretmen AI',
+    showRobotBtn: '🤖 Aven’i Göster',
+    apiKeyBtn: '⚙ API Anahtarı',
+    apiKeyBtnConfigured: '⚙ API Anahtarı ✓',
+    apiKeyBtnTitleConfigured: 'API anahtarı kayıtlı — değiştirmek için tıkla',
+    apiKeyBtnTitleUnconfigured: 'Groq API anahtarını gir',
+    hideRobotBtnTitle: 'Aven’i gizle',
+    teacherStageLabel: 'Aven öğretmen',
+    avenRobotAlt: 'Aven öğretmen robotu',
+    teacherGreetingBubble: 'Merhaba! Birlikte kodlamayı öğrenelim.',
+    micBtnStart: '🎤 Konuş',
+    micBtnStartTitle: 'Aven ile sesli konuşmayı başlat',
+    micBtnStop: '⏹ Durdur',
+    micBtnStopTitle: 'Sesli sohbeti durdur',
+    chatInputPlaceholder: 'Bir şey sor...',
+    sendBtn: 'Gönder',
+    apiKeyDialogTitle: 'Groq API Anahtarı',
+    apiKeyDialogDesc: 'Anahtar sadece bu bilgisayardaki .env dosyasına kaydedilir. Anahtarını kimseyle paylaşma.',
+    apiKeyInputLabel: 'API anahtarı',
+    cancelBtn: 'Vazgeç',
+    saveBtn: 'Kaydet',
+    apiKeySavedMsg: 'API anahtarı kaydedildi. Artık sorularını yanıtlayabilirim!',
+    apiKeySaveFailed: 'Anahtar kaydedilemedi.',
+    micPermissionMsg: 'Aven’in seni duyabilmesi için mikrofon izni vermen gerekiyor.',
+    micPermissionMsg2: 'Mikrofonu kullanabilmem için izin vermen gerekiyor.',
+    wakeWordHeard: '(uyandırma kelimesi duyuldu: "Aven")',
+    initialGreeting: 'Merhaba! Ben Aven, senin kodlama öğretmenin. “Aven” dersen ya da “Konuş” düğmesine basarsan seninle sesli konuşmaya başlarım.',
+    voiceLangBtnLabel: '🌐 TR',
+    voiceLangBtnTitle: 'Mikrofon ve arayüz şu an Türkçe - İngilizce\'ye geçmek için tıkla'
+  },
+  'en-US': {
+    templateLabel: '🗺️ Template:',
+    runBtn: '▶ Run',
+    runHint: 'Drag and drop blocks, then press Run!',
+    noBlocks: 'You need to place a few blocks first!',
+    goalReachedMsg: '🎉 You reached the goal!',
+    goalReachedLog: '🎉 Goal reached!',
+    bumpLog: '🚧 The character hit the edge and could not move.',
+    obstacleAheadLog: '🧱 There is an obstacle ahead — you may need to jump over it!',
+    forwardLog: '➡️  The character moved forward.',
+    turnLog: '🔄  The character turned.',
+    jumpObstacleLog: '⬆️  The character jumped over the obstacle!',
+    jumpLog: '⬆️  The character jumped!',
+    blockForward: 'move forward',
+    blockForwardTooltip: 'Moves the character one step forward',
+    blockTurn: 'turn',
+    blockTurnTooltip: 'Turns the character',
+    blockJump: 'jump',
+    blockJumpTooltip: 'Makes the character jump',
+    blockRepeatPrefix: 'repeat this',
+    blockRepeatSuffix: 'times',
+    blockRepeatTooltip: 'Repeats the blocks inside a set number of times',
+    chatHeaderTitle: '🧑‍🏫 Teacher AI',
+    showRobotBtn: '🤖 Show Aven',
+    apiKeyBtn: '⚙ API Key',
+    apiKeyBtnConfigured: '⚙ API Key ✓',
+    apiKeyBtnTitleConfigured: 'API key saved — click to change it',
+    apiKeyBtnTitleUnconfigured: 'Enter your Groq API key',
+    hideRobotBtnTitle: 'Hide Aven',
+    teacherStageLabel: 'Aven the teacher',
+    avenRobotAlt: 'Aven the teacher robot',
+    teacherGreetingBubble: 'Hi! Let\'s learn to code together.',
+    micBtnStart: '🎤 Talk',
+    micBtnStartTitle: 'Start talking with Aven',
+    micBtnStop: '⏹ Stop',
+    micBtnStopTitle: 'Stop the voice chat',
+    chatInputPlaceholder: 'Ask something...',
+    sendBtn: 'Send',
+    apiKeyDialogTitle: 'Groq API Key',
+    apiKeyDialogDesc: 'The key is only saved to the .env file on this computer. Don\'t share your key with anyone.',
+    apiKeyInputLabel: 'API key',
+    cancelBtn: 'Cancel',
+    saveBtn: 'Save',
+    apiKeySavedMsg: 'API key saved. I can answer your questions now!',
+    apiKeySaveFailed: 'Could not save the key.',
+    micPermissionMsg: 'I need microphone permission so Aven can hear you.',
+    micPermissionMsg2: 'I need permission to use the microphone.',
+    wakeWordHeard: '(wake word heard: "Aven")',
+    initialGreeting: 'Hi! I\'m Aven, your coding teacher. Say "Aven" or press the "Talk" button and I\'ll start talking with you.',
+    voiceLangBtnLabel: '🌐 EN',
+    voiceLangBtnTitle: 'Microphone and interface are in English now - click to switch to Turkish'
+  }
+};
+
+function uiText(key) { return (UI_TEXT[voiceLanguage] || UI_TEXT['tr-TR'])[key] || ''; }
+
+// Butonlar/etiketler/blok adları gibi TÜM sabit arayüz metnini günceller -
+// hem ilk açılışta (kaydedilmiş tercihle) hem TR/EN düğmesine her
+// tıklandığında çağrılır.
+function applyUILanguage() {
+  const setText = (id, key) => { const el = document.getElementById(id); if (el) el.textContent = uiText(key); };
+  const setTitle = (id, key) => { const el = document.getElementById(id); if (el) el.title = uiText(key); };
+  const setPlaceholder = (id, key) => { const el = document.getElementById(id); if (el) el.placeholder = uiText(key); };
+
+  const templateLabel = document.querySelector('label[for="templateSelect"]');
+  if (templateLabel) templateLabel.textContent = uiText('templateLabel');
+  setText('runBtn', 'runBtn');
+  setText('runHint', 'runHint');
+  setText('showRobotBtn', 'showRobotBtn');
+  setTitle('hideRobotBtn', 'hideRobotBtnTitle');
+  setTitle('avenRobot', 'avenRobotAlt');
+  const teacherStageEl = document.getElementById('teacherStage');
+  if (teacherStageEl) teacherStageEl.setAttribute('aria-label', uiText('teacherStageLabel'));
+  // Karsilama balonunu SADECE hala varsayilan/ilk karsilama metniyse guncelle
+  // (statik HTML varsayilani YA DA addMessage'in yazdigi ilk "initialGreeting"
+  // metni) - gercek bir sohbet cevabinin uzerine YAZMA (o zaten dogru dilde
+  // geldi, gecmis mesajlar geriye donuk cevrilmez).
+  const teacherSpeechEl = document.getElementById('teacherSpeech');
+  if (teacherSpeechEl) {
+    const isStillDefault = Object.values(UI_TEXT).some((d) =>
+      d.teacherGreetingBubble === teacherSpeechEl.textContent || d.initialGreeting === teacherSpeechEl.textContent);
+    if (isStillDefault) teacherSpeechEl.textContent = uiText('teacherGreetingBubble');
+  }
+  const chatHeaderSpan = document.querySelector('#chatHeader > span:first-child');
+  if (chatHeaderSpan) chatHeaderSpan.textContent = uiText('chatHeaderTitle');
+  setPlaceholder('chatInput', 'chatInputPlaceholder');
+  setText('sendBtn', 'sendBtn');
+  setText('apiKeyTitle', 'apiKeyDialogTitle');
+  const apiKeyDesc = document.querySelector('#apiKeyForm p');
+  if (apiKeyDesc) apiKeyDesc.textContent = uiText('apiKeyDialogDesc');
+  const apiKeyLabel = document.querySelector('label[for="apiKeyInput"]');
+  if (apiKeyLabel) apiKeyLabel.textContent = uiText('apiKeyInputLabel');
+  setText('cancelApiKeyBtn', 'cancelBtn');
+  setText('saveApiKeyBtn', 'saveBtn');
+
+  const voiceBtn = document.getElementById('voiceLangBtn');
+  if (voiceBtn) { voiceBtn.textContent = uiText('voiceLangBtnLabel'); voiceBtn.title = uiText('voiceLangBtnTitle'); }
+
+  if (typeof updateApiKeyButton === 'function') updateApiKeyButton();
+  if (typeof micBtn !== 'undefined' && micBtn) {
+    micBtn.innerText = voiceModeOn ? uiText('micBtnStop') : uiText('micBtnStart');
+    micBtn.title = uiText('micBtnStartTitle');
+  }
+
+  // Sablon dropdown'ini yeni dilde yeniden olustur, secili sablonu koru.
+  if (typeof templateSelect !== 'undefined' && templateSelect) {
+    const selectedId = currentTemplate ? currentTemplate.id : (TEMPLATES[0] && TEMPLATES[0].id);
+    templateSelect.innerHTML = '';
+    TEMPLATES.forEach((t) => {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.innerText = templateText(t, 'name');
+      templateSelect.appendChild(opt);
+    });
+    templateSelect.value = selectedId;
+  }
+
+  // Zaten yerlestirilmis (calisma alanindaki) bloklarin etiketlerini de
+  // guncelle - flyout'taki (henuz surukleyip birakilmamis) bloklar zaten
+  // bir sonraki acilista init() ile yeni dilde olusturulacak.
+  if (typeof workspace !== 'undefined' && workspace && workspace.getAllBlocks) {
+    const labelKeyByType = { move_forward: 'blockForward', turn_around: 'blockTurn', jump: 'blockJump' };
+    workspace.getAllBlocks(false).forEach((block) => {
+      if (labelKeyByType[block.type]) {
+        const field = block.inputList[0] && block.inputList[0].fieldRow.find((f) => f instanceof Blockly.FieldLabel);
+        if (field) field.setValue(uiText(labelKeyByType[block.type]));
+      } else if (block.type === 'repeat_n') {
+        const labels = block.inputList[0] ? block.inputList[0].fieldRow.filter((f) => f instanceof Blockly.FieldLabel) : [];
+        if (labels[0]) labels[0].setValue(uiText('blockRepeatPrefix'));
+        if (labels[1]) labels[1].setValue(uiText('blockRepeatSuffix'));
+      }
+    });
+  }
+}
+
+// ---------------------------------------------------------------
 // 1. ÖZEL BLOKLAR
 // ---------------------------------------------------------------
 Blockly.Blocks['move_forward'] = {
   init: function () {
-    this.appendDummyInput().appendField('ileri git');
+    this.appendDummyInput().appendField(uiText('blockForward'));
     this.setPreviousStatement(true, null);
     this.setNextStatement(true, null);
     this.setColour(160);
-    this.setTooltip('Karakteri bir adım ileri hareket ettirir');
+    this.setTooltip(uiText('blockForwardTooltip'));
   }
 };
 
 Blockly.Blocks['turn_around'] = {
   init: function () {
-    this.appendDummyInput().appendField('dön');
+    this.appendDummyInput().appendField(uiText('blockTurn'));
     this.setPreviousStatement(true, null);
     this.setNextStatement(true, null);
     this.setColour(160);
-    this.setTooltip('Karakteri döndürür');
+    this.setTooltip(uiText('blockTurnTooltip'));
   }
 };
 
 Blockly.Blocks['jump'] = {
   init: function () {
-    this.appendDummyInput().appendField('zıpla');
+    this.appendDummyInput().appendField(uiText('blockJump'));
     this.setPreviousStatement(true, null);
     this.setNextStatement(true, null);
     this.setColour(160);
-    this.setTooltip('Karakteri zıplatır');
+    this.setTooltip(uiText('blockJumpTooltip'));
   }
 };
 
 Blockly.Blocks['repeat_n'] = {
   init: function () {
     this.appendDummyInput()
-      .appendField('şunu')
+      .appendField(uiText('blockRepeatPrefix'))
       .appendField(new Blockly.FieldNumber(3, 1, 20), 'TIMES')
-      .appendField('kere tekrarla');
+      .appendField(uiText('blockRepeatSuffix'));
     this.appendStatementInput('DO').setCheck(null);
     this.setPreviousStatement(true, null);
     this.setNextStatement(true, null);
     this.setColour(210);
-    this.setTooltip('İçindeki blokları belirtilen sayıda tekrarlar');
+    this.setTooltip(uiText('blockRepeatTooltip'));
   }
 };
 
@@ -85,45 +286,60 @@ const TEMPLATES = [
   {
     id: 'duz-yol',
     name: '1) Düz Yol — İleriye Yürü',
+    nameEn: '1) Straight Road — Walk Forward',
     cols: 8, rows: 6,
     start: { x: 1, y: 3, angle: 0 },   // angle: 0=sağ, 90=aşağı, 180=sol, 270=yukarı
     goal: { x: 6, y: 3 },
-    hint: 'Karakteri sadece "ileri git" bloklarıyla bayrağa ulaştır.'
+    hint: 'Karakteri sadece "ileri git" bloklarıyla bayrağa ulaştır.',
+    hintEn: 'Get the character to the flag using only "move forward" blocks.'
   },
   {
     id: 'kose-donme',
     name: '2) Köşeyi Dön',
+    nameEn: '2) Turn the Corner',
     cols: 8, rows: 6,
     start: { x: 1, y: 1, angle: 0 },
     goal: { x: 6, y: 4 },
-    hint: 'Önce ileri git, sonra "dön" bloğunu kullan, sonra tekrar ileri git.'
+    hint: 'Önce ileri git, sonra "dön" bloğunu kullan, sonra tekrar ileri git.',
+    hintEn: 'First move forward, then use the "turn" block, then move forward again.'
   },
   {
     id: 'tekrar-pratigi',
     name: '3) Tekrar Bloğu Pratiği',
+    nameEn: '3) Repeat Block Practice',
     cols: 8, rows: 6,
     start: { x: 0, y: 5, angle: 270 },
     goal: { x: 0, y: 0 },
-    hint: '"N kere tekrarla" bloğunu kullanarak daha az blokla hedefe ulaş.'
+    hint: '"N kere tekrarla" bloğunu kullanarak daha az blokla hedefe ulaş.',
+    hintEn: 'Reach the goal with fewer blocks using the "repeat N times" block.'
   },
   {
     id: 'engelli-parkur',
     name: '4) Engelli Parkur — Zıpla',
+    nameEn: '4) Obstacle Course — Jump',
     cols: 8, rows: 6,
     start: { x: 1, y: 3, angle: 0 },
     goal: { x: 6, y: 3 },
     obstacle: { x: 4, y: 3 },
-    hint: 'Engelin üstünden geçmek için tam önünde "zıpla" bloğunu kullan.'
+    hint: 'Engelin üstünden geçmek için tam önünde "zıpla" bloğunu kullan.',
+    hintEn: 'Use the "jump" block right in front of the obstacle to get over it.'
   },
   {
     id: 'serbest-alan',
     name: '5) Serbest Alan (hedef yok)',
+    nameEn: '5) Free Play (no goal)',
     cols: 8, rows: 6,
     start: { x: 4, y: 3, angle: 0 },
     goal: null,
-    hint: 'Hedef yok, istediğin gibi deneme yapabilirsin.'
+    hint: 'Hedef yok, istediğin gibi deneme yapabilirsin.',
+    hintEn: 'No goal here — try anything you like.'
   }
 ];
+
+function templateText(tpl, field) {
+  if (voiceLanguage === 'en-US') return tpl[field + 'En'] || tpl[field];
+  return tpl[field];
+}
 
 let currentTemplate = TEMPLATES[0];
 let charState = { x: 0, y: 0, angle: 0 };
@@ -205,7 +421,7 @@ function loadTemplate(id) {
   currentTemplate = tpl;
   resetCharacter();
   if (tpl.hint) {
-    log(`💡 ${tpl.hint}`);
+    log(`💡 ${templateText(tpl, 'hint')}`);
   }
 }
 
@@ -213,7 +429,7 @@ const templateSelect = document.getElementById('templateSelect');
 TEMPLATES.forEach(t => {
   const opt = document.createElement('option');
   opt.value = t.id;
-  opt.innerText = t.name;
+  opt.innerText = templateText(t, 'name');
   templateSelect.appendChild(opt);
 });
 templateSelect.addEventListener('change', () => loadTemplate(templateSelect.value));
@@ -248,8 +464,8 @@ function checkGoal() {
   const g = currentTemplate.goal;
   if (g && !goalReached && charState.x === g.x && charState.y === g.y) {
     goalReached = true;
-    stageMsgEl.innerText = '🎉 Hedefe ulaştın!';
-    log('🎉 Hedefe ulaşıldı!');
+    stageMsgEl.innerText = uiText('goalReachedMsg');
+    log(uiText('goalReachedLog'));
     // Cocuk-profiline kalici olarak yazilsin - Aven bu sablonu artik
     // bildigini hatirlasin (bir sonraki oturumda bile).
     window.ogretmenAPI.reportTemplateProgress(currentTemplate.id, 'completed');
@@ -267,13 +483,13 @@ async function runBlock(block) {
       const blockedByObstacle = currentTemplate.obstacle &&
         currentTemplate.obstacle.x === nx && currentTemplate.obstacle.y === ny;
       if (!inBounds) {
-        log('🚧 Karakter kenara çarptı, ilerleyemedi.');
+        log(uiText('bumpLog'));
       } else if (blockedByObstacle) {
-        log('🧱 Önünde bir engel var — üstünden atlaman gerekebilir!');
+        log(uiText('obstacleAheadLog'));
       } else {
         charState.x = nx;
         charState.y = ny;
-        log('➡️  Karakter ileri gitti.');
+        log(uiText('forwardLog'));
       }
       drawScene();
       checkGoal();
@@ -282,7 +498,7 @@ async function runBlock(block) {
     }
     case 'turn_around':
       charState.angle = (charState.angle + 90) % 360;
-      log('🔄  Karakter döndü.');
+      log(uiText('turnLog'));
       drawScene();
       await sleep(300);
       break;
@@ -308,9 +524,9 @@ async function runBlock(block) {
           currentTemplate.obstacle.x === ahead.x && currentTemplate.obstacle.y === ahead.y) {
         charState.x = ahead.x + dx;
         charState.y = ahead.y + dy;
-        log('⬆️  Karakter zıplayıp engeli aştı!');
+        log(uiText('jumpObstacleLog'));
       } else {
-        log('⬆️  Karakter zıpladı!');
+        log(uiText('jumpLog'));
       }
       drawScene();
       checkGoal();
@@ -338,7 +554,7 @@ runBtn.addEventListener('click', async () => {
   resetCharacter();
   const topBlocks = workspace.getTopBlocks(true);
   if (topBlocks.length === 0) {
-    log('Önce birkaç blok yerleştirmelisin!');
+    log(uiText('noBlocks'));
     return;
   }
   runBtn.disabled = true;
@@ -405,8 +621,8 @@ function animateTalking(startTime) {
 
 async function updateApiKeyButton() {
   const result = await window.ogretmenAPI.getApiKeyStatus();
-  apiKeyBtn.innerText = result.configured ? '⚙ API Anahtarı ✓' : '⚙ API Anahtarı';
-  apiKeyBtn.title = result.configured ? 'API anahtarı kayıtlı — değiştirmek için tıkla' : 'Groq API anahtarını gir';
+  apiKeyBtn.innerText = result.configured ? uiText('apiKeyBtnConfigured') : uiText('apiKeyBtn');
+  apiKeyBtn.title = result.configured ? uiText('apiKeyBtnTitleConfigured') : uiText('apiKeyBtnTitleUnconfigured');
 }
 
 apiKeyBtn.addEventListener('click', () => {
@@ -423,12 +639,12 @@ apiKeyForm.addEventListener('submit', async (event) => {
   const apiKey = apiKeyInput.value.trim();
   const result = await window.ogretmenAPI.saveApiKey(apiKey);
   if (!result.ok) {
-    apiKeyStatus.innerText = result.message || 'Anahtar kaydedilemedi.';
+    apiKeyStatus.innerText = result.message || uiText('apiKeySaveFailed');
     return;
   }
   apiKeyDialog.close();
   updateApiKeyButton();
-  addMessage('API anahtarı kaydedildi. Artık sorularını yanıtlayabilirim!', 'ai');
+  addMessage(uiText('apiKeySavedMsg'), 'ai');
 });
 
 updateApiKeyButton();
@@ -476,7 +692,7 @@ async function prepareMicrophone() {
       return true;
     }).catch(() => {
       microphoneSetup = null;
-      addMessage('Aven’in seni duyabilmesi için mikrofon izni vermen gerekiyor.', 'ai');
+      addMessage(uiText('micPermissionMsg'), 'ai');
       return false;
     });
   }
@@ -568,15 +784,6 @@ chatInput.addEventListener('keydown', (e) => {
   }
 });
 
-// Mikrofonun hangi dili dinlediği - tarayıcının ses tanıma API'si TEK
-// seferde TEK dil dinler, otomatik dil algılama YOK, bu yüzden kullanıcı
-// (yeğen İngilizce'ye hakimse) bunu elle degistirebilsin diye bir dugme var
-// (bkz. voiceLangBtn asagida). Son secim hatirlanir (localStorage, sadece
-// bu cihazda/tarayicida - Aven'in KALICI cocuk profiliyle KARISTIRILMASIN,
-// o ayrı/sunucu tarafinda).
-let voiceLanguage = 'tr-TR';
-try { voiceLanguage = localStorage.getItem('ogretmenai-voice-lang') || 'tr-TR'; } catch (e) {}
-
 // Ses -> Metin (Windows Chromium'un yerleşik SpeechRecognition'ı;
 // internet bağlantısı gerektirebilir. Tam offline istenirse
 // ileride Vosk'a bağlanacak şekilde bu blok değiştirilebilir).
@@ -599,7 +806,7 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
 
   recognition.onerror = (event) => {
     if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-      addMessage('Mikrofonu kullanabilmem için izin vermen gerekiyor.', 'ai');
+      addMessage(uiText('micPermissionMsg2'), 'ai');
       stopVoiceMode();
       return;
     }
@@ -618,19 +825,12 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
 }
 
 const voiceLangBtn = document.getElementById('voiceLangBtn');
-function updateVoiceLangBtn() {
-  voiceLangBtn.innerText = voiceLanguage === 'tr-TR' ? '🌐 TR' : '🌐 EN';
-  voiceLangBtn.title = voiceLanguage === 'tr-TR'
-    ? 'Mikrofon şu an Türkçe dinliyor - İngilizce\'ye geçmek için tıkla'
-    : 'Mikrofon şu an İngilizce dinliyor - Türkçe\'ye geçmek için tıkla';
-}
 voiceLangBtn.addEventListener('click', () => {
   voiceLanguage = voiceLanguage === 'tr-TR' ? 'en-US' : 'tr-TR';
   try { localStorage.setItem('ogretmenai-voice-lang', voiceLanguage); } catch (e) {}
   if (recognition) recognition.lang = voiceLanguage;
-  updateVoiceLangBtn();
+  applyUILanguage();
 });
-updateVoiceLangBtn();
 
 async function startListening() {
   if (!recognition || isSpeaking || !voiceModeOn) return;
@@ -662,16 +862,16 @@ micBtn.addEventListener('click', () => {
 
 async function startVoiceMode() {
   voiceModeOn = true;
-  micBtn.title = 'Sesli sohbeti durdur';
-  micBtn.innerText = '⏹ Durdur';
+  micBtn.title = uiText('micBtnStopTitle');
+  micBtn.innerText = uiText('micBtnStop');
   stopWakeListener();
   await startListening();
 }
 
 function stopVoiceMode() {
   voiceModeOn = false;
-  micBtn.title = 'Aven ile sesli konuşmayı başlat';
-  micBtn.innerText = '🎤 Konuş';
+  micBtn.title = uiText('micBtnStartTitle');
+  micBtn.innerText = uiText('micBtnStart');
   stopListening();
   window.speechSynthesis.cancel(); // Chromium sesi calisiyorsa durdur
   // Not: Piper ile calan bir <audio> varsa o kendi akisinda biter;
@@ -703,7 +903,7 @@ if (recognition) { // tarayıcı SpeechRecognition destekliyorsa
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const said = event.results[i][0].transcript.toLowerCase();
       if (said.includes('aven')) {
-        addMessage('(uyandırma kelimesi duyuldu: "Aven")', 'ai');
+        addMessage(uiText('wakeWordHeard'), 'ai');
         startVoiceMode();
         return;
       }
@@ -744,8 +944,11 @@ function stopWakeListener() {
   try { wakeRecognition.stop(); } catch (e) {}
 }
 
+// Kaydedilmis dil tercihini TUM arayuze uygula (baslangicta bir kez).
+applyUILanguage();
+
 // Karşılama mesajı
-addMessage('Merhaba! Ben Aven, senin kodlama öğretmenin. “Aven” dersen ya da “Konuş” düğmesine basarsan seninle sesli konuşmaya başlarım.', 'ai');
+addMessage(uiText('initialGreeting'), 'ai');
 
 // Uygulama açılır açılmaz "Aven" kelimesini bekleyen dinleyiciyi başlat
 startWakeListener();
