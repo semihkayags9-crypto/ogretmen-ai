@@ -109,7 +109,7 @@
     align-items: center;
     justify-content: space-between;
   }
-  #apiKeyBtn {
+  #apiKeyBtn, #voiceLangBtn {
     border: 1px solid rgba(255,255,255,0.7);
     border-radius: 7px;
     padding: 6px 9px;
@@ -263,7 +263,7 @@
   </div>
 
   <div id="chatPanel">
-    <div id="chatHeader"><span>🧑‍🏫 Öğretmen AI</span><span><button id="showRobotBtn" type="button">🤖 Aven’i Göster</button><button id="apiKeyBtn" type="button">⚙ API Anahtarı</button></span></div>
+    <div id="chatHeader"><span>🧑‍🏫 Öğretmen AI</span><span><button id="voiceLangBtn" type="button">🌐 TR</button><button id="showRobotBtn" type="button">🤖 Aven’i Göster</button><button id="apiKeyBtn" type="button">⚙ API Anahtarı</button></span></div>
     <section id="teacherStage" aria-label="Aven öğretmen">
       <button id="hideRobotBtn" type="button" title="Aven’i gizle" aria-label="Aven’i gizle">×</button>
       <div id="robotWrap"><model-viewer id="avenRobot" src="../assets/aven-robot.glb" alt="Aven öğretmen robotu" camera-controls shadow-intensity="1" interaction-prompt="none"></model-viewer></div>

@@ -563,13 +563,22 @@ chatInput.addEventListener('keydown', (e) => {
   }
 });
 
+// Mikrofonun hangi dili dinlediği - tarayıcının ses tanıma API'si TEK
+// seferde TEK dil dinler, otomatik dil algılama YOK, bu yüzden kullanıcı
+// (yeğen İngilizce'ye hakimse) bunu elle degistirebilsin diye bir dugme var
+// (bkz. voiceLangBtn asagida). Son secim hatirlanir (localStorage, sadece
+// bu cihazda/tarayicida - Aven'in KALICI cocuk profiliyle KARISTIRILMASIN,
+// o ayrı/sunucu tarafinda).
+let voiceLanguage = 'tr-TR';
+try { voiceLanguage = localStorage.getItem('ogretmenai-voice-lang') || 'tr-TR'; } catch (e) {}
+
 // Ses -> Metin (Windows Chromium'un yerleşik SpeechRecognition'ı;
 // internet bağlantısı gerektirebilir. Tam offline istenirse
 // ileride Vosk'a bağlanacak şekilde bu blok değiştirilebilir).
 if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
   const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new SpeechRecognitionImpl();
-  recognition.lang = 'tr-TR';
+  recognition.lang = voiceLanguage;
   recognition.continuous = false;   // her turda bir cümle bekleriz
   recognition.interimResults = false;
   recognition.maxAlternatives = 1;
@@ -602,6 +611,21 @@ if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
   micBtn.disabled = true;
   micBtn.title = 'Bu ortamda sesli tanıma desteklenmiyor';
 }
+
+const voiceLangBtn = document.getElementById('voiceLangBtn');
+function updateVoiceLangBtn() {
+  voiceLangBtn.innerText = voiceLanguage === 'tr-TR' ? '🌐 TR' : '🌐 EN';
+  voiceLangBtn.title = voiceLanguage === 'tr-TR'
+    ? 'Mikrofon şu an Türkçe dinliyor - İngilizce\'ye geçmek için tıkla'
+    : 'Mikrofon şu an İngilizce dinliyor - Türkçe\'ye geçmek için tıkla';
+}
+voiceLangBtn.addEventListener('click', () => {
+  voiceLanguage = voiceLanguage === 'tr-TR' ? 'en-US' : 'tr-TR';
+  try { localStorage.setItem('ogretmenai-voice-lang', voiceLanguage); } catch (e) {}
+  if (recognition) recognition.lang = voiceLanguage;
+  updateVoiceLangBtn();
+});
+updateVoiceLangBtn();
 
 async function startListening() {
   if (!recognition || isSpeaking || !voiceModeOn) return;
