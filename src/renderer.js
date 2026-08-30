@@ -392,9 +392,14 @@ showRobotBtn.addEventListener('click', () => {
 function animateTalking(startTime) {
   if (!isSpeaking) { avenRobot.orientation = '0deg 0deg 0deg'; return; }
   const t = (performance.now() - startTime) / 1000;
-  const yaw = Math.sin(t * 6) * 5 + Math.sin(t * 2.3) * 2; // hafif sag-sol bas cevirme
-  const pitch = Math.sin(t * 4.5) * 2;                     // hafif yukari-asagi baş sallama
-  avenRobot.orientation = `0deg ${pitch.toFixed(2)}deg ${yaw.toFixed(2)}deg`;
+  // Ogretmen gibi ANLATIYORMUS hissi icin: yavas/genis bas cevirme + hafif
+  // one egilme (dinleyiciye donuk anlatan biri gibi) + cok hafif govde
+  // yalpasi (roll) - hizli/kucuk titresim yerine daha "kasitli hareket eden"
+  // bir tempo (dusuk frekans, buyuk genlik).
+  const yaw = Math.sin(t * 3.2) * 10 + Math.sin(t * 1.1) * 4;
+  const pitch = Math.sin(t * 2.6) * 5 + 2;
+  const roll = Math.sin(t * 1.7) * 3;
+  avenRobot.orientation = `${roll.toFixed(2)}deg ${pitch.toFixed(2)}deg ${yaw.toFixed(2)}deg`;
   requestAnimationFrame(() => animateTalking(startTime));
 }
 
