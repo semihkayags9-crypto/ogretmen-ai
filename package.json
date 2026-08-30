@@ -1,6 +1,6 @@
 {
   "name": "ogretmen-ai",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "8 yas grubu icin sesli/yazili blok-kodlama ogretmeni AI - temel iskelet",
   "main": "main.js",
   "scripts": {
