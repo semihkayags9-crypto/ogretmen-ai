@@ -6,7 +6,9 @@
   "scripts": {
     "start": "electron .",
     "build:win": "electron-builder --win --x64",
-    "build:linux": "electron-builder --linux --x64"
+    "build:linux": "electron-builder --linux --x64",
+    "release:win": "electron-builder --win --x64 --publish always",
+    "release:linux": "electron-builder --linux --x64 --publish always"
   },
   "author": "",
   "license": "MIT",
@@ -31,7 +33,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -43,7 +47,17 @@
       "language": "1055"
     },
     "linux": {
-      "target": ["AppImage"]
+      "target": [
+        "AppImage"
+      ]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "semihkayags9-crypto",
+      "repo": "ogretmen-ai"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
   }
 }

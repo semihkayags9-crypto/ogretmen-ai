@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { spawn } = require('child_process');
+const { autoUpdater } = require('electron-updater');
 
 let mainWindow;
 
@@ -23,8 +24,37 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 }
 
+// ---------------------------------------------------------------
+// UZAKTAN GUNCELLEME (electron-updater + GitHub Releases) - kullanicinin
+// acik istegi (2026-08-30): "uygulamayi uzaktan guncelleyebilir miyiz?"
+// Yeni sürümler `npm run release:win` ile GitHub'daki
+// semihkayags9-crypto/ogretmen-ai repo'suna yuklenir (bkz. package.json
+// build.publish); uygulama acilista arka planda kontrol eder, varsa
+// SESSIZCE indirir (ders sirasinda kesinti YOK), ve YEGEN uygulamayi
+// KAPATTIGINDA (dogal kapanista) kurar - asla zorla yeniden baslatmaz.
+// SADECE paketlenmis (.exe/AppImage) surumde calisir - `npm start` ile
+// gelistirici modunda (app.isPackaged === false) sessizce atlanir, cunku
+// kontrol edecek bir "yuklu surum" yok.
+// ---------------------------------------------------------------
+let updateReadyToInstall = false;
+
+function setupAutoUpdate() {
+  if (!app.isPackaged) return;
+  try {
+    autoUpdater.autoDownload = true;
+    autoUpdater.on('update-downloaded', () => { updateReadyToInstall = true; });
+    autoUpdater.on('error', (err) => {
+      console.error('Güncelleme kontrolü başarısız (sessizce geçildi, uygulama normal çalışmaya devam eder):', err.message);
+    });
+    autoUpdater.checkForUpdates();
+  } catch (e) {
+    console.error('Güncelleme sistemi başlatılamadı (sessizce geçildi):', e.message);
+  }
+}
+
 app.whenReady().then(() => {
   createWindow();
+  setupAutoUpdate();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -32,6 +62,10 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  if (updateReadyToInstall) {
+    autoUpdater.quitAndInstall();
+    return;
+  }
   if (process.platform !== 'darwin') app.quit();
 });
 
