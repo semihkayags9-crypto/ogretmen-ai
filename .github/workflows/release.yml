@@ -18,10 +18,7 @@ jobs:
         with:
           node-version: 20
       - run: npm install
-      - run: npm run release:win
+      - run: npm run build:win
+      - run: gh release upload v0.4.0 "dist/Ogretmen AI Setup 0.4.0.exe" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: setup-exe
-          path: dist/*.exe
