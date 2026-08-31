@@ -18,7 +18,7 @@ jobs:
         with:
           node-version: 20
       - run: npm install
-      - run: npm run build:win
+      - run: npx electron-builder --win --x64 --publish never
       - run: gh release upload v0.4.0 "dist/Ogretmen AI Setup 0.4.0.exe" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
