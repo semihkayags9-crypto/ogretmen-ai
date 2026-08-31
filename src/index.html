@@ -93,6 +93,91 @@
     max-height: 42px;
     overflow-y: auto;
   }
+  #modeTabBar {
+    display: flex;
+    background: #24344c;
+  }
+  #modeTabBar button {
+    flex: 1;
+    padding: 10px;
+    border: none;
+    background: transparent;
+    color: #aebdd2;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  #modeTabBar button.active {
+    background: #eef2f9;
+    color: #1b2a3a;
+    font-weight: bold;
+  }
+  #pythonArea {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  #pythonLessonBar {
+    padding: 8px 10px;
+    background: #eef2f9;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom: 1px solid #dbe3ee;
+  }
+  #pythonLessonBar label { font-size: 14px; color: #445; }
+  #pythonLessonSelect {
+    flex: 1;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid #ccd;
+    font-size: 14px;
+  }
+  #pythonCodeInput {
+    flex: 1;
+    min-height: 160px;
+    margin: 10px;
+    padding: 10px;
+    font-family: 'Consolas', monospace;
+    font-size: 14px;
+    border: 1px solid #ccd;
+    border-radius: 8px;
+    resize: none;
+  }
+  #pythonRunBar {
+    padding: 10px;
+    background: #ffffff;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  #pythonRunBar button {
+    padding: 10px 18px;
+    font-size: 16px;
+    border: none;
+    border-radius: 8px;
+    background: #4CAF50;
+    color: white;
+    cursor: pointer;
+  }
+  #pythonRunBar button:disabled {
+    background: #a9d3ac;
+    cursor: not-allowed;
+  }
+  #pythonOutput {
+    background: #1b2a3a;
+    color: #7fffb0;
+    font-family: 'Consolas', monospace;
+    font-size: 13px;
+    padding: 10px 12px;
+    margin: 0 10px 10px;
+    border-radius: 8px;
+    min-height: 80px;
+    max-height: 160px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+  }
+  .msg.system { text-align: center; color: #8a97a8; font-style: italic; font-size: 0.92em; }
   #chatPanel {
     flex: 1;
     display: flex;
@@ -246,19 +331,37 @@
 <body>
 
   <div id="blocklyArea">
-    <div id="templateBar">
-      <label for="templateSelect">🗺️ Şablon:</label>
-      <select id="templateSelect"></select>
+    <div id="modeTabBar">
+      <button id="blockModeTabBtn" type="button" class="active">🧱 Blok Modu</button>
+      <button id="pythonModeTabBtn" type="button">🐍 Python Modu</button>
     </div>
-    <div id="blocklyDiv"></div>
-    <div id="runBar">
-      <button id="runBtn">▶ Çalıştır</button>
-      <span id="runHint">Blokları sürükleyip bırak, sonra Çalıştır'a bas!</span>
+    <div id="blockModePanel">
+      <div id="templateBar">
+        <label for="templateSelect">🗺️ Şablon:</label>
+        <select id="templateSelect"></select>
+      </div>
+      <div id="blocklyDiv"></div>
+      <div id="runBar">
+        <button id="runBtn">▶ Çalıştır</button>
+        <span id="runHint">Blokları sürükleyip bırak, sonra Çalıştır'a bas!</span>
+      </div>
+      <div id="stageWrap">
+        <canvas id="stageCanvas" width="480" height="360"></canvas>
+        <div id="stageMsg"></div>
+        <div id="stageLog"></div>
+      </div>
     </div>
-    <div id="stageWrap">
-      <canvas id="stageCanvas" width="480" height="360"></canvas>
-      <div id="stageMsg"></div>
-      <div id="stageLog"></div>
+    <div id="pythonArea" style="display:none">
+      <div id="pythonLessonBar">
+        <label for="pythonLessonSelect">🐍 Ders:</label>
+        <select id="pythonLessonSelect"></select>
+      </div>
+      <textarea id="pythonCodeInput" spellcheck="false"></textarea>
+      <div id="pythonRunBar">
+        <button id="pythonRunBtn">▶ Çalıştır</button>
+        <span id="pythonRunHint">Kodu değiştir, sonra Çalıştır'a bas!</span>
+      </div>
+      <div id="pythonOutput"></div>
     </div>
   </div>
 

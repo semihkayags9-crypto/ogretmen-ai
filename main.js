@@ -5,8 +5,9 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { spawn } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const { autoUpdater } = require('electron-updater');
+const AdmZip = require('adm-zip');
 
 let mainWindow;
 
@@ -173,13 +174,17 @@ function loadChildProfile() {
       return {
         summary: parsed.summary || '',
         lastUpdated: parsed.lastUpdated || null,
-        templateProgress: parsed.templateProgress || {}
+        templateProgress: parsed.templateProgress || {},
+        // pythonProgress: templateProgress ile AYNI sekil ({attempts, completed,
+        // lastAt}) - Python Modu icin ayri bir kalici kayit, ayni yuk/kayit
+        // fonksiyonlarini paylasir (yeni bir dosya/mekanizma DEGIL).
+        pythonProgress: parsed.pythonProgress || {}
       };
     }
   } catch (e) {
     console.error('Çocuk profili okunamadı, boş profille başlanıyor:', e.message);
   }
-  return { summary: '', lastUpdated: null, templateProgress: {} };
+  return { summary: '', lastUpdated: null, templateProgress: {}, pythonProgress: {} };
 }
 
 function saveChildProfile(profile) {
@@ -230,13 +235,63 @@ eklemeden söyle.
 
 Çocuk konu dışına çıkarsa kısa cevapla, sonra nazikçe kodlamaya geri döndür.`;
 
+// PYTHON MODU - kullanicinin acik istegi (2026-08-31): "python kullanimi ve
+// egitimi cok onemli... ai ogretmen otomatik python indirip kursun ve neyi
+// nasil yapacagini cocuga soylesin." Blok ogretmeninin AYNI sicak/adim-adim
+// tarzi, ama GERCEK Python sozdizimi icin ozel kurallarla - bkz. asagidaki
+// "SESLE OKUNACAK" notu, blok tarafinda olmayan bir gereksinim (cocuk ekrandaki
+// parantez/tirnak gibi sembolleri KENDI BASINA okuyamayabilir).
+const PYTHON_SYSTEM_PROMPT_BASE = `Sen 8 yasindaki bir cocuga GERCEK Python kodu yazmayi ogreten, Türkçe ve İngilizce konuşabilen bir öğretmensin.
+
+Nasıl konuşursun (blok dersleriyle AYNI kurallar):
+- Türkçe konuşurken kusursuz/doğal Türkçe kullan, çocuğun son mesajının dilinde cevap ver.
+- Kısa, sıcak, en fazla üç kısa cümle. Somut örnek ver, soyut anlatma.
+- Cevabın sesli okunacak; emoji, madde işareti, markdown KULLANMA - doğal konuşma metni yaz.
+
+Python'a ÖZEL kural (bloklardan FARKI budur): çocuk ekrandaki kodu kendi başına
+okuyamayabilir - bir satırı SÖYLERKEN her sembolü KELİMEYLE söyle: "parantez aç",
+"parantez kapat", "tırnak işareti", "eşittir işareti", "iki nokta üst üste",
+"girinti" (satır başındaki boşluk). Örnek: print parantez aç tırnak işareti
+Merhaba tırnak işareti parantez kapat, gibi.
+
+Öğretim yöntemin:
+- Çocuğa asla boş bir ekrandan başlatma - her ders için ekranda ZATEN yazılı
+  bir başlangıç kodu var, senin işin çocuğa TEK bir küçük değişiklik yaptırmak
+  (bir kelimeyi/sayıyı değiştirmek gibi) ve "Çalıştır" düğmesine bastırmak.
+- Kod çalıştırıldığında gerçek çıktı ya da gerçek bir Python hatası sana
+  otomatik olarak bildirilir ("[Kodu çalıştırdım] Çıktı: ..." ya da "Hata
+  oluştu: ..." şeklinde bir sistem mesajı olarak). Bunu GÖRÜNCE tepki ver -
+  hata varsa çocuğu suçlamadan "Python bize şunu söylüyor" diyerek basitçe
+  açıkla ve TEK bir düzeltme öner; çıktı doğruysa kısaca kutla ve bir sonraki
+  küçük adımı söyle.
+- Bir işlevi/kütüphaneyi (import, pip, turtle gibi) ASLA önerme - şu an sadece
+  print, değişken, sayı, basit for/if kullanılabiliyor, başka hiçbir şey kurulu
+  değil.
+
+Çocuk konu dışına çıkarsa kısa cevapla, sonra nazikçe Python'a geri döndür.`;
+
 // Her cagrida GUNCEL profille birlikte kurulur (childProfile.summary bir
 // onceki cagridan sonra degismis olabilir - bkz. refreshChildProfile).
-function buildSystemPrompt() {
-  if (!childProfile.summary) return SYSTEM_PROMPT_BASE;
-  return `${SYSTEM_PROMPT_BASE}\n\nBu çocukla önceki derslerden hatırladıkların (kalıcı hafızandan): ` +
-    `${childProfile.summary}\nOnu SIFIRDAN tanıyormuş gibi değil, kaldığın yerden devam ediyormuş gibi konuş; ` +
-    `bildiğin şeyleri tekrar açıklamadan öğretimini buna göre uyarla.`;
+// mode: 'blockly' (varsayilan, geriye donuk uyumlu) | 'python'.
+function buildSystemPrompt(mode) {
+  const base = mode === 'python' ? PYTHON_SYSTEM_PROMPT_BASE : SYSTEM_PROMPT_BASE;
+  let prompt = base;
+  if (childProfile.summary) {
+    prompt += `\n\nBu çocukla önceki derslerden hatırladıkların (kalıcı hafızandan): ` +
+      `${childProfile.summary}\nOnu SIFIRDAN tanıyormuş gibi değil, kaldığın yerden devam ediyormuş gibi konuş; ` +
+      `bildiğin şeyleri tekrar açıklamadan öğretimini buna göre uyarla.`;
+  }
+  // GERCEK bir eksiklik duzeltildi: templateProgress hep diske yaziliyordu
+  // ama AI'a hicbir zaman GERI verilmiyordu (sadece serbest-metin "summary"
+  // kullaniliyordu) - Python Modu icin bunu atlamiyoruz, hangi derslerin
+  // tamamlandigi AI cagrisi GEREKMEDEN (ucretsiz/aninda) dogrudan eklenir.
+  if (mode === 'python') {
+    const completed = Object.entries(childProfile.pythonProgress || {})
+      .filter(([, v]) => v.completed).map(([id]) => id);
+    if (completed.length > 0)
+      prompt += `\n\nÇocuğun tamamladığı Python dersleri: ${completed.join(', ')}. Bunları tekrar en baştan anlatma, kaldığı yerden devam et.`;
+  }
+  return prompt;
 }
 
 // Konusma gecmisi (KISA VADELI - RAM'de, uygulama kapaninca sifirlanir).
@@ -294,7 +349,7 @@ async function refreshChildProfile() {
   }
 }
 
-ipcMain.handle('ai:ask', async (event, userText) => {
+ipcMain.handle('ai:ask', async (event, userText, mode) => {
   if (!GROQ_API_KEY) {
     return 'API anahtari bulunamadi. Proje klasorunde .env dosyasi olusturup icine GROQ_API_KEY=... yazman gerekiyor.';
   }
@@ -318,7 +373,7 @@ ipcMain.handle('ai:ask', async (event, userText) => {
         // Qwen'in iç düşünme metnini göstermeden, çocukla akıcı konuşmasını sağla.
         reasoning_effort: 'none',
         messages: [
-          { role: 'system', content: buildSystemPrompt() },
+          { role: 'system', content: buildSystemPrompt(mode) },
           ...conversationHistory
         ],
         temperature: 0.7,
@@ -420,6 +475,18 @@ ipcMain.handle('progress:template-event', (event, templateId, kind) => {
   return { ok: true };
 });
 
+// progress:template-event ile AYNI desen, Python dersleri icin.
+ipcMain.handle('progress:python-event', (event, lessonId, kind) => {
+  if (!lessonId) return { ok: false };
+  const entry = childProfile.pythonProgress[lessonId] || { attempts: 0, completed: false };
+  if (kind === 'attempt') entry.attempts += 1;
+  if (kind === 'completed') entry.completed = true;
+  entry.lastAt = new Date().toISOString();
+  childProfile.pythonProgress[lessonId] = entry;
+  saveChildProfile(childProfile);
+  return { ok: true };
+});
+
 // ---------------------------------------------------------------
 // PIPER TTS ENTEGRASYONU
 // Piper, tamamen ucretsiz/acik kaynak, YEREL calisan noral bir ses
@@ -464,6 +531,12 @@ ipcMain.handle('tts:speak', async (event, text) => {
   return new Promise((resolve) => {
     const proc = spawn(PIPER_EXE, [
       '--model', PIPER_MODEL,
+      // GERCEKTEN yasandi (AvenSmith'in kendi Piper entegrasyonunda, ayni
+      // sorun): --length_scale verilmezse Piper'in KENDI varsayilani 1.0'da
+      // kalir, bu da cocuklar icin gereksiz yavas/agir bir ses cikarir.
+      // 0.85 GERCEK olcumlerle dogrulanmis (ayni motor, farkli proje) -
+      // duzgun anlasilir kalirken belirgin sekilde daha dogal/hizli konusuyor.
+      '--length_scale', '0.85',
       '--output_file', outFile
     ]);
 
@@ -494,5 +567,113 @@ ipcMain.handle('tts:speak', async (event, text) => {
     // Piper metni stdin uzerinden alir
     proc.stdin.write(text);
     proc.stdin.end();
+  });
+});
+
+// ---------------------------------------------------------------
+// PYTHON MODU - kullanicinin acik istegi (2026-08-31): "ai ogretmen otomatik
+// python indirip kursun". python.org'un RESMI "embeddable package"i kullanilir
+// (kurulumsuz, admin hakki gerektirmeyen kucuk bir zip - normal Windows
+// yukleyicisinin AKSINE) - ilk kez Python Modu'na girildiginde indirilip
+// userData altina cikartilir, sonraki acilislarda tekrar indirilmez.
+//
+// KAPSAM DISI (bilerek): pip/paket kurulumu, import gerektiren kutuphaneler
+// (turtle/random vb.) - embeddable paketin varsayilan _pth dosyasi bunlari
+// zaten kapatiyor, print/degisken/for/if gibi SADECE yerlesik (builtin)
+// ozellikler icin bu hic sorun degil, mufredat da (asagida renderer.js'de)
+// buna gore sinirli tutuldu.
+// ---------------------------------------------------------------
+
+const PYTHON_VERSION = '3.12.7';
+const PYTHON_DIR = path.join(app.getPath('userData'), 'python-runtime', PYTHON_VERSION);
+const PYTHON_EXE_WIN = path.join(PYTHON_DIR, 'python.exe');
+// Gelistirici kolayligi: bu depo Linux'ta `npm start` ile de calisiyor -
+// paketlenmis surum SADECE Windows (NSIS) olarak dagitiliyor, ama Linux'ta
+// gelistirirken embeddable zip'i indirmeye UGRASMADAN sistemde zaten kurulu
+// python3/python'u kullanmak pratik bir gelistirici kolayligidir (SADECE
+// win32 DISINDA devreye girer, paketlenmis davranisi hic etkilemez).
+function resolvePythonExePath() {
+  if (process.platform === 'win32') return PYTHON_EXE_WIN;
+  return null; // asagida PATH'ten python3/python aranir
+}
+
+function pythonEmbeddableUrl() {
+  return `https://www.python.org/ftp/python/${PYTHON_VERSION}/python-${PYTHON_VERSION}-embed-amd64.zip`;
+}
+
+let pythonEnsureInFlight = null;
+
+function isPythonReady() {
+  if (process.platform !== 'win32') return true; // gelistirici modunda PATH'e guveniyoruz
+  return fs.existsSync(PYTHON_EXE_WIN);
+}
+
+// Ilk kez Python Modu'na girildiginde cagrilir - zaten kuruluysa aninda doner.
+// Ayni anda birden fazla cagri gelirse (cift tiklama gibi) TEK bir indirmeyi
+// paylasirlar (pythonEnsureInFlight).
+async function ensurePythonInstalled() {
+  if (isPythonReady()) return { ok: true, alreadyInstalled: true };
+  if (process.platform !== 'win32') {
+    return { ok: false, reason: 'not-windows', message: 'Bu özellik şu an sadece Windows sürümünde otomatik kuruluyor.' };
+  }
+  if (pythonEnsureInFlight) return pythonEnsureInFlight;
+
+  pythonEnsureInFlight = (async () => {
+    try {
+      fs.mkdirSync(PYTHON_DIR, { recursive: true });
+      const response = await fetch(pythonEmbeddableUrl());
+      if (!response.ok) return { ok: false, reason: 'download-failed', status: response.status };
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const zipPath = path.join(PYTHON_DIR, 'python-embed.zip');
+      fs.writeFileSync(zipPath, buffer);
+      const zip = new AdmZip(zipPath);
+      zip.extractAllTo(PYTHON_DIR, true);
+      fs.unlink(zipPath, () => {}); // gecici zip'i temizle
+      if (!fs.existsSync(PYTHON_EXE_WIN)) return { ok: false, reason: 'extract-incomplete' };
+      return { ok: true, alreadyInstalled: false };
+    } catch (e) {
+      console.error('Python indirilemedi/kurulamadi:', e.message);
+      return { ok: false, reason: 'error', message: e.message };
+    } finally {
+      pythonEnsureInFlight = null;
+    }
+  })();
+  return pythonEnsureInFlight;
+}
+
+ipcMain.handle('python:get-status', () => ({ installed: isPythonReady(), version: PYTHON_VERSION }));
+ipcMain.handle('python:ensure-installed', () => ensurePythonInstalled());
+
+// Cocugun yazdigi kodu GERCEKTEN calistirir. Tek-kullanicili yerel bir masaustu
+// uygulamasi oldugu icin (paylasimli/coklu-kullanicili bir sunucu DEGIL) asil
+// gercekci risk kotu niyetli kod degil, bir cocugun yanlislikla yazdigi sonsuz
+// dongu/asiri uzun ciktidir - bunun icin execFile'in KENDI timeout/maxBuffer
+// mekanizmasi kullanilir (elle setTimeout+kill YAZILMADI, gereksiz).
+ipcMain.handle('python:run-code', async (event, code) => {
+  const exePath = resolvePythonExePath();
+  const command = exePath || 'python3'; // exePath sadece win32'de dolu, digerlerinde PATH'teki python3 kullanilir
+  if (process.platform === 'win32' && !isPythonReady()) {
+    return { ok: false, reason: 'python-not-installed' };
+  }
+  const tmpFile = path.join(os.tmpdir(), `ogretmen-ai-run-${Date.now()}.py`);
+  fs.writeFileSync(tmpFile, code || '', 'utf8');
+
+  return new Promise((resolve) => {
+    execFile(command, [tmpFile], {
+      timeout: 10000,       // 10sn - sonsuz donguye giren cocuk kodu sonsuza kadar takilmasin
+      killSignal: 'SIGKILL',
+      maxBuffer: 2 * 1024 * 1024, // 2MB - hizli bir print dongusu bile bunu asamaz once timeout dolar
+      windowsHide: true
+    }, (error, stdout, stderr) => {
+      fs.unlink(tmpFile, () => {}); // gecici .py dosyasini temizle
+      const timedOut = Boolean(error && error.killed && error.signal === 'SIGKILL');
+      resolve({
+        ok: !error,
+        stdout: stdout || '',
+        stderr: stderr || (error ? error.message : ''),
+        timedOut,
+        exitCode: error ? (typeof error.code === 'number' ? error.code : null) : 0
+      });
+    });
   });
 });

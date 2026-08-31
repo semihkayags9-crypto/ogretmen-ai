@@ -67,7 +67,19 @@ const UI_TEXT = {
     wakeWordHeard: '(uyandırma kelimesi duyuldu: "Aven")',
     initialGreeting: 'Merhaba! Ben Aven, senin kodlama öğretmenin. “Aven” dersen ya da “Konuş” düğmesine basarsan seninle sesli konuşmaya başlarım.',
     voiceLangBtnLabel: '🌐 TR',
-    voiceLangBtnTitle: 'Mikrofon ve arayüz şu an Türkçe - İngilizce\'ye geçmek için tıkla'
+    voiceLangBtnTitle: 'Mikrofon ve arayüz şu an Türkçe - İngilizce\'ye geçmek için tıkla',
+    blockModeTabLabel: '🧱 Blok Modu',
+    pythonModeTabLabel: '🐍 Python Modu',
+    pythonLessonLabel: '🐍 Ders:',
+    pythonRunBtn: '▶ Çalıştır',
+    pythonRunHint: 'Kodu değiştir, sonra Çalıştır\'a bas!',
+    pythonInstalling: 'Python indiriliyor, biraz bekle...',
+    pythonInstallFailed: 'Python indirilemedi - internet bağlantını kontrol edip tekrar dene.',
+    pythonNotWindows: 'Bu özellik şu an sadece Windows sürümünde otomatik kuruluyor.',
+    pythonRanOk: '[Kodu çalıştırdım] Çıktı:',
+    pythonRanEmptyOk: '[Kodu çalıştırdım] Çalıştı ama ekrana bir şey yazdırmadı.',
+    pythonRanError: '[Kodu çalıştırdım] Hata oluştu:',
+    pythonTimedOut: '[Kodu çalıştırdım] Kod çok uzun sürdü, durdurdum - muhtemelen bitmeyen bir döngü var.'
   },
   'en-US': {
     templateLabel: '🗺️ Template:',
@@ -119,7 +131,19 @@ const UI_TEXT = {
     wakeWordHeard: '(wake word heard: "Aven")',
     initialGreeting: 'Hi! I\'m Aven, your coding teacher. Say "Aven" or press the "Talk" button and I\'ll start talking with you.',
     voiceLangBtnLabel: '🌐 EN',
-    voiceLangBtnTitle: 'Microphone and interface are in English now - click to switch to Turkish'
+    voiceLangBtnTitle: 'Microphone and interface are in English now - click to switch to Turkish',
+    blockModeTabLabel: '🧱 Block Mode',
+    pythonModeTabLabel: '🐍 Python Mode',
+    pythonLessonLabel: '🐍 Lesson:',
+    pythonRunBtn: '▶ Run',
+    pythonRunHint: 'Change the code, then press Run!',
+    pythonInstalling: 'Downloading Python, hang on...',
+    pythonInstallFailed: 'Could not download Python - check your internet connection and try again.',
+    pythonNotWindows: 'This feature is only auto-installed on the Windows version for now.',
+    pythonRanOk: '[Ran the code] Output:',
+    pythonRanEmptyOk: '[Ran the code] It ran but did not print anything.',
+    pythonRanError: '[Ran the code] An error happened:',
+    pythonTimedOut: '[Ran the code] It took too long, so I stopped it - probably a loop that never ends.'
   }
 };
 
@@ -166,6 +190,25 @@ function applyUILanguage() {
 
   const voiceBtn = document.getElementById('voiceLangBtn');
   if (voiceBtn) { voiceBtn.textContent = uiText('voiceLangBtnLabel'); voiceBtn.title = uiText('voiceLangBtnTitle'); }
+
+  setText('blockModeTabBtn', 'blockModeTabLabel');
+  setText('pythonModeTabBtn', 'pythonModeTabLabel');
+  const pythonLessonLabel = document.querySelector('label[for="pythonLessonSelect"]');
+  if (pythonLessonLabel) pythonLessonLabel.textContent = uiText('pythonLessonLabel');
+  setText('pythonRunBtn', 'pythonRunBtn');
+  setText('pythonRunHint', 'pythonRunHint');
+  // Ders dropdown'ini yeni dilde yeniden olustur (sablon dropdown'iyla AYNI desen).
+  if (typeof pythonLessonSelect !== 'undefined' && pythonLessonSelect) {
+    const selectedId = currentPythonLesson ? currentPythonLesson.id : (PYTHON_LESSONS[0] && PYTHON_LESSONS[0].id);
+    pythonLessonSelect.innerHTML = '';
+    PYTHON_LESSONS.forEach((l) => {
+      const opt = document.createElement('option');
+      opt.value = l.id;
+      opt.innerText = pythonLessonText(l, 'name');
+      pythonLessonSelect.appendChild(opt);
+    });
+    pythonLessonSelect.value = selectedId;
+  }
 
   if (typeof updateApiKeyButton === 'function') updateApiKeyButton();
   if (typeof micBtn !== 'undefined' && micBtn) {
@@ -713,7 +756,10 @@ updateApiKeyButton();
 function addMessage(text, who) {
   const div = document.createElement('div');
   div.className = 'msg ' + who;
-  div.innerText = (who === 'user' ? '🧒 ' : '🤖 ') + text;
+  // 'system': Python kodu calistirildiginda otomatik uretilen rapor - cocugun
+  // GERCEKTEN yazdigi bir mesaj DEGIL, bu yuzden 🧒/🤖 onekiyle karistirmiyoruz.
+  const prefix = who === 'user' ? '🧒 ' : who === 'ai' ? '🤖 ' : '';
+  div.innerText = prefix + text;
   chatLog.appendChild(div);
   chatLog.scrollTop = chatLog.scrollHeight;
   if (who === 'ai') teacherSpeech.innerText = text;
@@ -866,10 +912,172 @@ if ('speechSynthesis' in window) {
   window.speechSynthesis.getVoices();
 }
 
-async function sendToAI(text) {
-  addMessage(text, 'user');
-  chatInput.value = '';
-  const reply = await window.ogretmenAPI.askAI(text);
+// ---------------------------------------------------------------
+// PYTHON MODU - kullanicinin acik istegi (2026-08-31): "python kullanimi ve
+// egitimi cok onemli... ai ogretmen otomatik python indirip kursun". TEMPLATES/
+// loadTemplate/templateSelect ile YAPISAL OLARAK AYNI desen (bkz. yukarida) -
+// kucuk, sabit bir mufredat listesi; kalici ilerleme childProfile.pythonProgress'te
+// (main.js) tutulur, AYNI load/save fonksiyonlariyla.
+// ---------------------------------------------------------------
+const PYTHON_LESSONS = [
+  {
+    id: 'merhaba-dunya',
+    name: '1) Merhaba Dünya',
+    nameEn: '1) Hello World',
+    hint: 'Kodu değiştirmene bile gerek yok - sadece Çalıştır\'a bas ve gerçek çıktıyı gör!',
+    hintEn: 'You don\'t even need to change the code - just press Run and see the real output!',
+    starterCode: 'print("Merhaba Dünya!")'
+  },
+  {
+    id: 'adini-soyle',
+    name: '2) Adını Söyle',
+    nameEn: '2) Say Your Name',
+    hint: '"Ayşe" yazan yeri kendi adınla değiştir, sonra Çalıştır\'a bas.',
+    hintEn: 'Change "Ayşe" to your own name, then press Run.',
+    starterCode: 'isim = "Ayşe"\nprint(isim)'
+  },
+  {
+    id: 'sayilarla-oyna',
+    name: '3) Sayılarla Oyna',
+    nameEn: '3) Play with Numbers',
+    hint: '8 sayısını değiştir, çıktının nasıl değiştiğini gör.',
+    hintEn: 'Change the number 8 and see how the output changes.',
+    starterCode: 'yas = 8\nprint(yas + 1)'
+  },
+  {
+    id: 'tekrar-et',
+    name: '4) Tekrar Et',
+    nameEn: '4) Repeat It',
+    hint: 'Blok Modu\'ndaki "N kere tekrarla" bloğunun GERÇEK Python hali budur.',
+    hintEn: 'This is the REAL Python version of the "repeat N times" block from Block Mode.',
+    starterCode: 'for i in range(5):\n    print("Merhaba!")'
+  },
+  {
+    id: 'eger',
+    name: '5) Eğer',
+    nameEn: '5) If',
+    hint: 'Blok Modu\'ndaki "eğer" fikri - yaşı değiştirip her iki durumu da dene.',
+    hintEn: 'The "if" idea from Block Mode - change the age and try both cases.',
+    starterCode: 'yas = 8\nif yas >= 8:\n    print("Kodlamaya hazırsın!")\nelse:\n    print("Neredeyse hazırsın!")'
+  },
+  {
+    id: 'kendi-kodun',
+    name: '6) Kendi Kodun (serbest)',
+    nameEn: '6) Your Own Code (free)',
+    hint: 'Hedef yok, istediğin gibi deneme yapabilirsin.',
+    hintEn: 'No goal here — try anything you like.',
+    starterCode: ''
+  }
+];
+
+function pythonLessonText(lesson, field) {
+  if (voiceLanguage === 'en-US') return lesson[field + 'En'] || lesson[field];
+  return lesson[field];
+}
+
+let currentPythonLesson = PYTHON_LESSONS[0];
+let currentMode = 'blockly'; // 'blockly' | 'python' - sendToAI'nin hangi ogretmen kimligini istedigini belirler
+let pythonInstallChecked = false;
+
+const pythonLessonSelect = document.getElementById('pythonLessonSelect');
+const pythonCodeInput = document.getElementById('pythonCodeInput');
+const pythonOutput = document.getElementById('pythonOutput');
+const pythonRunBtn = document.getElementById('pythonRunBtn');
+const blockModeTabBtn = document.getElementById('blockModeTabBtn');
+const pythonModeTabBtn = document.getElementById('pythonModeTabBtn');
+const blockModePanel = document.getElementById('blockModePanel');
+const pythonArea = document.getElementById('pythonArea');
+
+PYTHON_LESSONS.forEach((l) => {
+  const opt = document.createElement('option');
+  opt.value = l.id;
+  opt.innerText = pythonLessonText(l, 'name');
+  pythonLessonSelect.appendChild(opt);
+});
+
+function setPythonOutput(text) { pythonOutput.textContent = text; }
+
+function loadPythonLesson(id) {
+  const lesson = PYTHON_LESSONS.find((l) => l.id === id) || PYTHON_LESSONS[0];
+  currentPythonLesson = lesson;
+  pythonCodeInput.value = lesson.starterCode;
+  setPythonOutput(pythonLessonText(lesson, 'hint'));
+}
+
+pythonLessonSelect.addEventListener('change', () => loadPythonLesson(pythonLessonSelect.value));
+loadPythonLesson(PYTHON_LESSONS[0].id);
+
+// Python Modu'na ilk kez girildiginde (ya da ilk Calistir'a basildiginda)
+// cagrilir - zaten kuruluysa aninda basarili doner (main.js: isPythonReady()).
+async function ensurePythonReadyOnce() {
+  if (pythonInstallChecked) return true;
+  const status = await window.ogretmenAPI.getPythonStatus();
+  if (status.installed) { pythonInstallChecked = true; return true; }
+  pythonRunBtn.disabled = true;
+  setPythonOutput(uiText('pythonInstalling'));
+  const result = await window.ogretmenAPI.ensurePythonInstalled();
+  pythonRunBtn.disabled = false;
+  if (!result.ok) {
+    setPythonOutput(result.reason === 'not-windows' ? uiText('pythonNotWindows') : uiText('pythonInstallFailed'));
+    return false;
+  }
+  pythonInstallChecked = true;
+  setPythonOutput(pythonLessonText(currentPythonLesson, 'hint'));
+  return true;
+}
+
+blockModeTabBtn.addEventListener('click', () => {
+  currentMode = 'blockly';
+  blockModeTabBtn.classList.add('active');
+  pythonModeTabBtn.classList.remove('active');
+  blockModePanel.style.display = '';
+  pythonArea.style.display = 'none';
+});
+pythonModeTabBtn.addEventListener('click', async () => {
+  currentMode = 'python';
+  pythonModeTabBtn.classList.add('active');
+  blockModeTabBtn.classList.remove('active');
+  blockModePanel.style.display = 'none';
+  pythonArea.style.display = 'flex';
+  await ensurePythonReadyOnce();
+});
+
+pythonRunBtn.addEventListener('click', async () => {
+  const code = pythonCodeInput.value;
+  window.ogretmenAPI.reportPythonProgress(currentPythonLesson.id, 'attempt');
+  pythonRunBtn.disabled = true;
+  const ready = await ensurePythonReadyOnce();
+  if (!ready) { pythonRunBtn.disabled = false; return; }
+  const result = await window.ogretmenAPI.runPythonCode(code);
+  pythonRunBtn.disabled = false;
+
+  // Cocugun okuyup transkript etmesine gerek kalmadan GERCEK stdout/stderr'i
+  // dogrudan AI ogretmene bir "sistem raporu" olarak gonderiyoruz (asagida
+  // sendToAI) - AI, tam da az once yazdigi kodun GERCEK sonucuna tepki verir.
+  let report;
+  if (result.timedOut) {
+    setPythonOutput(uiText('pythonTimedOut'));
+    report = uiText('pythonTimedOut');
+  } else if (result.ok) {
+    const out = (result.stdout || '').trim();
+    setPythonOutput(out || uiText('pythonRanEmptyOk'));
+    report = out ? `${uiText('pythonRanOk')} ${out}` : uiText('pythonRanEmptyOk');
+    window.ogretmenAPI.reportPythonProgress(currentPythonLesson.id, 'completed');
+  } else {
+    const err = (result.stderr || '').trim();
+    setPythonOutput(err);
+    report = `${uiText('pythonRanError')} ${err}`;
+  }
+  addMessage(report, 'system');
+  await sendToAI(report, { skipUserBubble: true });
+});
+
+async function sendToAI(text, opts = {}) {
+  if (!opts.skipUserBubble) {
+    addMessage(text, 'user');
+    chatInput.value = '';
+  }
+  const reply = await window.ogretmenAPI.askAI(text, currentMode);
   addMessage(reply, 'ai');
 
   speak(reply, () => {
@@ -907,7 +1115,12 @@ voiceLangBtn.addEventListener('click', () => {
 async function startListening() {
   if (isSpeaking || !voiceModeOn) return;
   micBtn.classList.add('listening');
-  const blob = await recordUntilSilence({ maxMs: 8000, silenceMs: 1100, isCancelled: () => !voiceModeOn });
+  // silenceMs 1100 -> 750: kullanicinin "mikrofon gecikmesi" sikayeti sonrasi -
+  // cocuk konusmayi bitirdikten sonra AI'in tepki vermesi icin GEREKSIZ uzun
+  // bir sessizlik bekleniyordu. 750ms hala dogal bir konusma duraklamasini
+  // (kelime aralari) yanlislikla "bitti" saymayacak kadar uzun, ama onceki
+  // 1100ms'e gore belirgin sekilde daha hizli tepki verir.
+  const blob = await recordUntilSilence({ maxMs: 8000, silenceMs: 750, isCancelled: () => !voiceModeOn });
   micBtn.classList.remove('listening');
   if (!voiceModeOn) return; // bu sirada durduruldu
 
