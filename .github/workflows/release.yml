@@ -21,3 +21,7 @@ jobs:
       - run: npm run release:win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: setup-exe
+          path: dist/*.exe
