@@ -23,6 +23,12 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+  // [TANI] gecici - renderer'in (Chromium) konsol ciktisini ana surecin
+  // stdout'una da yazdirir, boylece terminalden GUI acmadan renderer
+  // tarafindaki hatalari da gorebiliriz.
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    console.log('[RENDERER]', message, `(${sourceId}:${line})`);
+  });
 }
 
 // ---------------------------------------------------------------
@@ -56,6 +62,13 @@ function setupAutoUpdate() {
 app.whenReady().then(() => {
   createWindow();
   setupAutoUpdate();
+  // GERCEKTEN istendi (2026-09-11, Semih: "sesimi de çok geç algıladı") -
+  // Mihu STT ve FreyaTTS'in model yuklemesi ~4-7sn surebiliyor (GERCEKTEN
+  // olculdu); bunu COCUK ILK KEZ konusana/cevap bekleyene KADAR ertelemek
+  // yerine uygulama acilir acilmaz (fire-and-forget, cevabi BEKLENMIYOR)
+  // baslat - boylece cocuk mikrofona ilk bastiginda model COKTAN hazir olur.
+  ensureMihuReady();
+  ensureFreyaReady();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -67,6 +80,9 @@ app.on('window-all-closed', () => {
   // templateProgress gibi) bellekte biriken hali kapanista da diske yazilsin -
   // "hafiza problemi" sikayetinin bir parcasi da buydu.
   saveChildProfile(childProfile);
+  // Surekli calisan Mihu STT surecini de kapat - aksi halde uygulama kapansa
+  // bile arka planda bir Python sureci yasamaya devam ederdi.
+  if (mihuProcess) { try { mihuProcess.kill(); } catch (e) {} }
   if (updateReadyToInstall) {
     autoUpdater.quitAndInstall();
     return;
@@ -178,13 +194,38 @@ function loadChildProfile() {
         // pythonProgress: templateProgress ile AYNI sekil ({attempts, completed,
         // lastAt}) - Python Modu icin ayri bir kalici kayit, ayni yuk/kayit
         // fonksiyonlarini paylasir (yeni bir dosya/mekanizma DEGIL).
-        pythonProgress: parsed.pythonProgress || {}
+        pythonProgress: parsed.pythonProgress || {},
+        // GERCEKTEN genisletildi (2026-09-10, Semih: "hafizasini da genislet") -
+        // eskiden TEK hafiza kaynagi serbest-metin "summary" idi: her yenilemede
+        // TAMAMEN UZERINE YAZILIYORDU, yani bir onceki turda ogrenilen ama yeni
+        // ozette tekrar edilmeyen bir detay SESSIZCE KAYBOLUYORDU. Bu ucu (interests/
+        // strengths/struggles) YAPILANDIRILMIS listeler - refreshChildProfile bunlari
+        // BIRIKTIREREK (dedup ile) gunceller, asla tumden silmez.
+        interests: Array.isArray(parsed.interests) ? parsed.interests : [],
+        strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
+        struggles: Array.isArray(parsed.struggles) ? parsed.struggles : [],
+        sessionCount: typeof parsed.sessionCount === 'number' ? parsed.sessionCount : 0
       };
     }
   } catch (e) {
     console.error('Çocuk profili okunamadı, boş profille başlanıyor:', e.message);
   }
-  return { summary: '', lastUpdated: null, templateProgress: {}, pythonProgress: {} };
+  return { summary: '', lastUpdated: null, templateProgress: {}, pythonProgress: {}, interests: [], strengths: [], struggles: [], sessionCount: 0 };
+}
+
+// Bir listeye (interests/strengths/struggles) yeni ogeler ekler - kucuk/buyuk
+// harf ve bosluk farkini yok sayarak YINELENENLERI atar, en YENI en fazla
+// `max` oge kalacak sekilde eskileri budar (sinirsiz buyumesin diye).
+function mergeProfileList(existing, incoming, max) {
+  const list = Array.isArray(existing) ? [...existing] : [];
+  for (const item of (Array.isArray(incoming) ? incoming : [])) {
+    const clean = typeof item === 'string' ? item.trim() : '';
+    if (!clean) continue;
+    const dupeIndex = list.findIndex((x) => x.toLowerCase() === clean.toLowerCase());
+    if (dupeIndex !== -1) list.splice(dupeIndex, 1); // en yeni bahsedilis en sona gitsin
+    list.push(clean);
+  }
+  return list.slice(-max);
 }
 
 function saveChildProfile(profile) {
@@ -197,43 +238,10 @@ function saveChildProfile(profile) {
 }
 
 let childProfile = loadChildProfile();
-
-// Ogretmenin kimligi. Cocugun yasina ve seviyesine gore ayarlanmis.
-// Bunu degistirerek ogretmenin tarzini/konusunu tamamen degistirebilirsin.
-const SYSTEM_PROMPT_BASE = `Sen 8 yasindaki bir cocuga blok kodlama ogreten, Türkçe ve İngilizce konuşabilen bir öğretmensin. Kişiliğin sıcak, samimi, destekleyici ve olumlu.
-
-Nasıl konuşursun:
-- Türkçe konuşurken ana dili Türkçe olan bir öğretmen gibi, kusursuz ve doğal Türkçe kullan. Uydurma sözcük ya da yanlış çekim kullanma.
-- Çocuğun son mesajının dilinde cevap ver: Türkçe soruya Türkçe, English soruya English cevap ver.
-- Çocuk iki dili karıştırırsa, en çok kullandığı dili seç; isterse diğer dile nazikçe geç.
-- Kısa, sıcak ve anlaşılır cümleler kur. Bir seferde en fazla üç kısa cümle söyle.
-- Somut örnek ver: "3 elma + 2 elma" gibi, soyut anlatma.
-- Çocuk bir şey yanlış yaptığında azarlamak yerine "Sence ne olur?" diye sor ve birlikte denemeye çağır.
-- Cevabın sesli okunacak; emoji, madde işareti ve kod bloğu kullanmadan yalnızca doğal konuşma metni yaz.
-
-Öğretim yöntemin:
-- Çocuğun kodlama temelinin hiç olmadığını varsay. "Döngü", "komut" veya "algoritma" gibi sözcükleri önce çok basitçe açıklamadan kullanma.
-- Dersin başında çocuğa seçim yükleme. "Hangi bloğu koymak istersin?" diye sorma.
-- Bunun yerine çok küçük, somut bir hedef belirle: örneğin "Arabayı bayrağa götürelim." Ardından yalnızca tek bir sonraki adımı söyle.
-- Her adımda bloğun TAM OLARAK asağıdaki dört isimden birini kullanarak söyle: "Soldaki ileri git bloğunu alıp ortadaki boş alana bırak." Çocuk deneyince sonucu anlat ve bir sonraki tek adıma geç.
-- Önce ileri git, sonra dön, sonra zıpla; tekrar bloğunu en son ve yalnızca çocuk temel hareketleri anladığında öğret.
-- Çocuk ne yapacağını bilmiyorsa cevabı sen ver; tahmin etmesi için zorlamadan birlikte uygula.
-- Başarıyı kısa ve içten biçimde kutla. Hata olursa "Sorun değil, birlikte düzeltiriz" diyerek tek bir düzeltme öner.
-
-Öğrettiğin kavramlar: sıralı komutlar, tekrar (döngü), koşul (eğer-o zaman),
-değişken. Çocuk ekranda blokları sürükleyip bırakıyor - ekranda TAM OLARAK
-şu DÖRT blok var, BAŞKA HİÇBİR blok/varyant YOK:
-- "ileri git"
-- "dön" — DİKKAT: sadece TEK bir dön bloğu var, HER ZAMAN saat yönünde 90°
-  döner. "sağa dön", "sola dön", "kırmızı dön", "sarı sağa dön" gibi ayrı
-  bloklar YOKTUR ve ASLA yokmuş gibi söyleme/uydurma - sadece "dön bloğu" de.
-- "zıpla"
-- "N kere tekrarla"
-Blokların rengini SÖYLEME (renk çocuğa göre değişebilir, ekranda net görünür
-zaten) - sadece yukarıdaki dört isimden BİRİNİ, başka hiçbir sıfat/varyant
-eklemeden söyle.
-
-Çocuk konu dışına çıkarsa kısa cevapla, sonra nazikçe kodlamaya geri döndür.`;
+// Her uygulama acilisinda bir artir - buildSystemPrompt'un "N. oturum" bilgisini
+// dogru versin diye HEMEN (ilk mesaj beklenmeden) diske yazilir.
+childProfile.sessionCount = (childProfile.sessionCount || 0) + 1;
+saveChildProfile(childProfile);
 
 // PYTHON MODU - kullanicinin acik istegi (2026-08-31): "python kullanimi ve
 // egitimi cok onemli... ai ogretmen otomatik python indirip kursun ve neyi
@@ -247,6 +255,8 @@ Nasıl konuşursun (blok dersleriyle AYNI kurallar):
 - Türkçe konuşurken kusursuz/doğal Türkçe kullan, çocuğun son mesajının dilinde cevap ver.
 - Kısa, sıcak, en fazla üç kısa cümle. Somut örnek ver, soyut anlatma.
 - Cevabın sesli okunacak; emoji, madde işareti, markdown KULLANMA - doğal konuşma metni yaz.
+- KALIP CÜMLE KURMA: hep aynı şekilde başlayan/biten ezber cümleler YASAK - her cevap o ana özel, doğal kurulmalı.
+- Çocuğun söylediği şey alakasız/anlamsızsa ya da ses tanıma yanlış anlamışsa UYDURMA CEVAP VERME - "Seni tam anlayamadım, tekrar söyler misin?" de.
 
 Python'a ÖZEL kural (bloklardan FARKI budur): çocuk ekrandaki kodu kendi başına
 okuyamayabilir - bir satırı SÖYLERKEN her sembolü KELİMEYLE söyle: "parantez aç",
@@ -264,23 +274,34 @@ Merhaba tırnak işareti parantez kapat, gibi.
   hata varsa çocuğu suçlamadan "Python bize şunu söylüyor" diyerek basitçe
   açıkla ve TEK bir düzeltme öner; çıktı doğruysa kısaca kutla ve bir sonraki
   küçük adımı söyle.
-- Bir işlevi/kütüphaneyi (import, pip, turtle gibi) ASLA önerme - şu an sadece
-  print, değişken, sayı, basit for/if kullanılabiliyor, başka hiçbir şey kurulu
-  değil.
+- Dış bir kütüphane/paket (import requests, pip install gibi) ASLA önerme -
+  sadece Python'ın kendi standart temel özellikleri (print, değişken, sayı,
+  metin/string, liste, sözlük, for/while, if, fonksiyon/def) kullanılabiliyor,
+  internet erişimi ya da kurulum gerektiren hiçbir şey yok.
 
 Çocuk konu dışına çıkarsa kısa cevapla, sonra nazikçe Python'a geri döndür.`;
 
 // Her cagrida GUNCEL profille birlikte kurulur (childProfile.summary bir
 // onceki cagridan sonra degismis olabilir - bkz. refreshChildProfile).
-// mode: 'blockly' (varsayilan, geriye donuk uyumlu) | 'python'.
+// Blok Modu kaldirildiktan sonra (2026-09-11) tek ogretmen kimligi kaldi -
+// 'mode' parametresi geriye donuk uyumluluk icin duruyor ama artik hep 'python'.
 function buildSystemPrompt(mode) {
-  const base = mode === 'python' ? PYTHON_SYSTEM_PROMPT_BASE : SYSTEM_PROMPT_BASE;
-  let prompt = base;
+  let prompt = PYTHON_SYSTEM_PROMPT_BASE;
   if (childProfile.summary) {
     prompt += `\n\nBu çocukla önceki derslerden hatırladıkların (kalıcı hafızandan): ` +
       `${childProfile.summary}\nOnu SIFIRDAN tanıyormuş gibi değil, kaldığın yerden devam ediyormuş gibi konuş; ` +
       `bildiğin şeyleri tekrar açıklamadan öğretimini buna göre uyarla.`;
   }
+  // GERCEKTEN genisletildi (2026-09-10): summary'nin YANINDA (yerine degil) somut,
+  // yapilandirilmis hatirlamalar - serbest metnin unutabildigi detaylari kaybetmeden.
+  if (Array.isArray(childProfile.interests) && childProfile.interests.length > 0)
+    prompt += `\nİlgi alanları/hoşlandığı şeyler: ${childProfile.interests.join(', ')}. Fırsat bulursan örneklerini bunlardan seç.`;
+  if (Array.isArray(childProfile.strengths) && childProfile.strengths.length > 0)
+    prompt += `\nİyi olduğu/kolay kavradığı konular: ${childProfile.strengths.join(', ')}. Bunları baştan anlatma, üzerine ekle.`;
+  if (Array.isArray(childProfile.struggles) && childProfile.struggles.length > 0)
+    prompt += `\nZorlandığı konular: ${childProfile.struggles.join(', ')}. Bunlara denk gelirsen normalden daha sabırlı/yavaş ve daha çok örnekle anlat.`;
+  if (childProfile.sessionCount > 1)
+    prompt += `\nBu, bu çocukla ${childProfile.sessionCount}. oturumun - yeni tanışıyormuş gibi "merhaba, ben Aven" diye baştan tanıtma, doğal bir devam havasında konuş.`;
   // GERCEK bir eksiklik duzeltildi: templateProgress hep diske yaziliyordu
   // ama AI'a hicbir zaman GERI verilmiyordu (sadece serbest-metin "summary"
   // kullaniliyordu) - Python Modu icin bunu atlamiyoruz, hangi derslerin
@@ -319,11 +340,18 @@ async function refreshChildProfile() {
     const recentText = conversationHistory.slice(-12)
       .map((m) => `${m.role === 'user' ? 'Çocuk' : 'Öğretmen'}: ${m.content}`)
       .join('\n');
+    // GERCEKTEN genisletildi (2026-09-10): tek bir serbest-metin ozet yerine
+    // YAPILANDIRILMIS JSON istiyoruz - boylece strengths/struggles/interests
+    // her seferinde SIFIRDAN yazilmak yerine BIRIKTIRILEBILIR (mergeProfileList),
+    // eski bir bilgi sadece yeni ozette tekrar edilmedi diye kaybolmaz.
     const prompt = `Bir çocuğa blok-kodlama öğreten bir öğretmen AI'sın. Bu çocuk hakkında ŞİMDİYE KADAR ` +
-      `bildiklerin: "${childProfile.summary || 'henüz yok'}"\n\nSon konuşmadan bir kesit:\n${recentText}\n\n` +
-      `Bu bilgiyi GÜNCELLE: çocuğun öğrenme tarzı (kısa mı uzun mu açıklama seviyor, örnekle mi anlıyor), ` +
-      `hangi kavramlarda zorlandığı/kolay kavradığı, ilgi alanları, dil tercihi gibi SONRAKİ bir öğretmenin ` +
-      `işine yarayacak şeyleri 2-4 kısa Türkçe cümleyle özetle. Sadece özet metnini yaz, başka açıklama ekleme.`;
+      `bildiklerin (serbest özet): "${childProfile.summary || 'henüz yok'}"\n\nSon konuşmadan bir kesit:\n${recentText}\n\n` +
+      `SADECE şu alanları içeren geçerli bir JSON nesnesi döndür, başka HİÇBİR metin ekleme:\n` +
+      `{"summary": "öğrenme tarzı/dil tercihi gibi genel bir izlenim, 2-3 kısa Türkçe cümle",\n` +
+      `"interests": ["bu kesitte fark edilen ilgi alanı/hobi, varsa - yoksa boş dizi"],\n` +
+      `"strengths": ["bu kesitte kolay kavradığı/iyi olduğu somut bir kavram, varsa - yoksa boş dizi"],\n` +
+      `"struggles": ["bu kesitte zorlandığı somut bir kavram, varsa - yoksa boş dizi"]}\n` +
+      `interests/strengths/struggles içine SADECE bu kesitte GERÇEKTEN gözlemlediklerini yaz, uydurma veya tahmin etme - emin değilsen boş bırak.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -331,19 +359,25 @@ async function refreshChildProfile() {
       body: JSON.stringify({
         model: GROQ_MODEL,
         reasoning_effort: 'none',
+        response_format: { type: 'json_object' },
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.4,
-        max_tokens: 200
+        max_tokens: 300
       })
     });
     if (!response.ok) return;
     const data = await response.json();
-    const newSummary = data.choices?.[0]?.message?.content?.trim();
-    if (newSummary) {
-      childProfile.summary = newSummary;
-      childProfile.lastUpdated = new Date().toISOString();
-      saveChildProfile(childProfile);
-    }
+    const raw = data.choices?.[0]?.message?.content?.trim();
+    if (!raw) return;
+    let parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { return; } // gecersiz JSON gelirse SESSIZCE atla, eski profiliyi BOZMA
+
+    if (parsed.summary && typeof parsed.summary === 'string') childProfile.summary = parsed.summary.trim();
+    childProfile.interests = mergeProfileList(childProfile.interests, parsed.interests, 8);
+    childProfile.strengths = mergeProfileList(childProfile.strengths, parsed.strengths, 8);
+    childProfile.struggles = mergeProfileList(childProfile.struggles, parsed.struggles, 8);
+    childProfile.lastUpdated = new Date().toISOString();
+    saveChildProfile(childProfile);
   } catch (e) {
     console.error('Çocuk profili güncellenemedi (sohbet buna rağmen devam eder):', e.message);
   }
@@ -418,17 +452,165 @@ ipcMain.handle('ai:ask', async (event, userText, mode) => {
 });
 
 // ---------------------------------------------------------------
-// SES -> METIN (Groq Whisper) - GERCEKTEN yasandi: Electron'un icindeki
-// ciplak Chromium'da webkitSpeechRecognition (tarayici SpeechRecognition API'si)
-// GUVENILIR CALISMIYOR - Google'in bulut konusma servisine erismek icin
-// gereken API anahtari gercek Chrome'da var, ciplak Chromium'da (Electron'un
-// kullandigi) YOK. Sonuc: sessizce "network" hatasi verip sonsuza kadar
-// yeniden deniyor, cocuk konusuyor ama hicbir sey olmuyordu. Bunun yerine
-// renderer gercek sesi kaydedip (MediaRecorder) buraya gonderiyor, biz de
-// ZATEN kullandigimiz Groq anahtariyla /audio/transcriptions'a yolluyoruz -
-// yeni bir anahtar/servis gerekmiyor.
+// MIHU TURKISH-STT (yerel, ucretsiz, GPU gerektirmez) - kullanicinin acik
+// istegi (2026-09-11, Semih: "GPU desteği yok... bunun için şöyle bir çözüm
+// araştırdım" - Mihu Turkish-STT + FreyaTTS). Bu ortamda GERCEKTEN olculdu:
+// sadece TRANSKRIPSIYON (import/model-yukleme haric) 7.4 saniyelik gercek
+// Turkce konusma icin 0.42 saniye surdu (RTF ~0.056, gercek zamandan ~18x
+// hizli) - Mihu'nun kendi resmi RTF 0.128 iddiasindan bile daha iyi cikti.
+// Import+model-yukleme ISE ~4-5 saniye surdugu icin (bir kere yuklenip
+// SONRA hizli calisiyor) her istekte YENI bir Python sureci baslatmak yerine
+// TEK bir surekli ("persistent") Python sureci baslatilip stdin/stdout
+// uzerinden JSON istekleri gonderiliyor - Piper TTS'in aksine (o her cagride
+// yeniden spawn ediliyor, cunku onun baslatma maliyeti onemsiz), burada
+// baslatma maliyeti asil isin 10 katindan fazla oldugu icin bu fark KRITIK.
+//
+// KAPSAM (2026-09-11, bilerek SINIRLI tutuldu): şu an SADECE gelistirici
+// modunda (npm start, Linux) ve SADECE Turkce icin aktif - sistem PATH'indeki
+// 'python3'e ve onun turkish-stt paketine guveniyor (resolvePythonExePath'in
+// mevcut Python-Modu deseniyle AYNI mantik). Windows'ta (paketlenmis surum,
+// yegenin GERCEK bilgisayari) bunun icin ayrica bir embeddable-Python + pip
+// bootstrap'i GEREKIR (ensurePythonInstalled'daki desene benzer) - bu HENUZ
+// yazilmadi ve TEST EDILEMEDI (bu ortamda Windows makinesi yok), bu yuzden
+// win32'de bilerek devre disi birakiliyor, mevcut Groq Whisper yolu (asagida)
+// DEGISMEDEN calismaya devam ediyor. Yani şu an bu SADECE bir kanit-niteligi
+// prototip - Windows paketleme AYRI, henuz yapilmamis bir is.
+// ---------------------------------------------------------------
+let mihuProcess = null;
+let mihuReady = null; // Promise<boolean> - ayni anda birden fazla baslatma denemesini onler
+let mihuRequestId = 0;
+const mihuPending = new Map(); // id -> {resolve, reject}
+
+function mihuAvailableOnThisPlatform() {
+  // bkz. yukaridaki KAPSAM notu - Windows bootstrap'i henuz yok.
+  return process.platform !== 'win32';
+}
+
+function startMihuProcess() {
+  return new Promise((resolve) => {
+    const workerScript = [
+      'import sys, json',
+      'import mihu_stt',
+      'sys.stdout.reconfigure(line_buffering=True)',
+      'print(json.dumps({"ready": True}))',
+      'for line in sys.stdin:',
+      '    line = line.strip()',
+      '    if not line:',
+      '        continue',
+      '    req = json.loads(line)',
+      '    try:',
+      '        text = mihu_stt.transcribe(req["path"])',
+      '        print(json.dumps({"id": req.get("id"), "ok": True, "text": text}))',
+      '    except Exception as e:',
+      '        print(json.dumps({"id": req.get("id"), "ok": False, "error": str(e)}))'
+    ].join('\n');
+
+    let proc;
+    try {
+      proc = spawn('python3', ['-c', workerScript]);
+    } catch (e) {
+      console.error('Mihu STT süreci başlatılamadı:', e.message);
+      resolve(false);
+      return;
+    }
+
+    let settled = false;
+    // Python tarafinda import/model-yukleme hatasi olursa traceback BURAYA
+    // (stderr) duser - onceden hic okunmuyordu.
+    proc.stderr.on('data', (chunk) => console.error('[Mihu STT stderr]', chunk.toString().trim()));
+    let buffer = '';
+    proc.stdout.on('data', (chunk) => {
+      buffer += chunk.toString();
+      let idx;
+      while ((idx = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 1);
+        if (!line) continue;
+        let msg;
+        try { msg = JSON.parse(line); } catch (e) { continue; }
+        if (msg.ready && !settled) {
+          settled = true;
+          mihuProcess = proc;
+          resolve(true);
+          continue;
+        }
+        const pending = mihuPending.get(msg.id);
+        if (pending) {
+          mihuPending.delete(msg.id);
+          if (msg.ok) pending.resolve(msg.text);
+          else pending.reject(new Error(msg.error || 'Mihu STT hatası'));
+        }
+      }
+    });
+    proc.on('error', () => { if (!settled) { settled = true; resolve(false); } });
+    proc.on('close', () => {
+      mihuProcess = null;
+      mihuReady = null;
+      for (const { reject } of mihuPending.values()) reject(new Error('Mihu STT süreci kapandı'));
+      mihuPending.clear();
+      if (!settled) { settled = true; resolve(false); }
+    });
+    // Import + model yukleme ~4-5sn surebiliyor (GERCEKTEN olculdu) - ilk
+    // baslatmada makul bir ust sinir, sonsuza kadar beklemesin.
+    setTimeout(() => { if (!settled) { settled = true; resolve(false); } }, 20000);
+  });
+}
+
+function ensureMihuReady() {
+  if (!mihuAvailableOnThisPlatform()) return Promise.resolve(false);
+  if (!mihuReady) mihuReady = startMihuProcess();
+  return mihuReady;
+}
+
+function transcribeWithMihu(wavPath) {
+  return new Promise((resolve, reject) => {
+    if (!mihuProcess) { reject(new Error('Mihu STT süreci hazır değil')); return; }
+    const id = ++mihuRequestId;
+    mihuPending.set(id, { resolve, reject });
+    mihuProcess.stdin.write(JSON.stringify({ id, path: wavPath }) + '\n');
+  });
+}
+
+// Chromium'un MediaRecorder'ı ses kaydını webm/opus olarak veriyor, ama Mihu
+// (sherpa-onnx tabanlı) düz WAV/PCM istiyor - ffmpeg ile 16kHz mono WAV'a
+// çeviriyoruz. ffmpeg yoksa (ör. henüz ffmpeg.exe gömülmemiş bir Windows
+// kurulumu) SESSIZCE false döner, çağıran taraf Groq Whisper'a düşer.
+function convertWebmToWav16k(webmPath, wavPath) {
+  return new Promise((resolve) => {
+    execFile('ffmpeg', ['-y', '-i', webmPath, '-ar', '16000', '-ac', '1', wavPath], (error) => {
+      resolve(!error && fs.existsSync(wavPath));
+    });
+  });
+}
+
+// ---------------------------------------------------------------
+// SES -> METIN (once Mihu yerel/ücretsiz dener [SADECE 'tr' + bkz. yukarida
+// KAPSAM notu], olmazsa/başarısız olursa Groq Whisper'a düşer) - GERCEKTEN
+// yasandi: Electron'un icindeki ciplak Chromium'da webkitSpeechRecognition
+// (tarayici SpeechRecognition API'si) GUVENILIR CALISMIYOR - Google'in bulut
+// konusma servisine erismek icin gereken API anahtari gercek Chrome'da var,
+// ciplak Chromium'da (Electron'un kullandigi) YOK. Bunun yerine renderer
+// gercek sesi kaydedip (MediaRecorder) buraya gonderiyor.
 // ---------------------------------------------------------------
 ipcMain.handle('audio:transcribe', async (event, arrayBuffer, mimeType, language) => {
+  if (language === 'tr' && mihuAvailableOnThisPlatform()) {
+    const tmpWebm = path.join(os.tmpdir(), `ogretmen-ai-stt-${Date.now()}.webm`);
+    const tmpWav = path.join(os.tmpdir(), `ogretmen-ai-stt-${Date.now()}.wav`);
+    try {
+      fs.writeFileSync(tmpWebm, Buffer.from(arrayBuffer));
+      const ready = await ensureMihuReady();
+      if (ready && (await convertWebmToWav16k(tmpWebm, tmpWav))) {
+        const text = await transcribeWithMihu(tmpWav);
+        if (text && text.trim()) return { ok: true, text: text.trim() };
+      }
+    } catch (e) {
+      console.error('Mihu STT denemesi başarısız, Groq Whisper\'a düşülüyor:', e.message);
+    } finally {
+      fs.unlink(tmpWebm, () => {});
+      fs.unlink(tmpWav, () => {});
+    }
+  }
+
   if (!GROQ_API_KEY) return { ok: false, text: '' };
   try {
     const form = new FormData();
@@ -462,20 +644,11 @@ ipcMain.handle('ai:reset', async () => {
   return { ok: true };
 });
 
-// Blockly calistiricisindan (renderer.js) gelir - AI cagrisi GEREKMEZ, ucretsiz/
-// aninda. Hangi sablonun kac kez denendigini/tamamlandigini kalici profile yazar.
-ipcMain.handle('progress:template-event', (event, templateId, kind) => {
-  if (!templateId) return { ok: false };
-  const entry = childProfile.templateProgress[templateId] || { attempts: 0, completed: false };
-  if (kind === 'attempt') entry.attempts += 1;
-  if (kind === 'completed') entry.completed = true;
-  entry.lastAt = new Date().toISOString();
-  childProfile.templateProgress[templateId] = entry;
-  saveChildProfile(childProfile);
-  return { ok: true };
-});
-
-// progress:template-event ile AYNI desen, Python dersleri icin.
+// Python dersi calistiricisindan (renderer.js) gelir - AI cagrisi GEREKMEZ,
+// ucretsiz/aninda. Hangi dersin kac kez denendigini/tamamlandigini kalici
+// profile yazar. (Blok Modu kaldirildi 2026-09-11 - templateProgress artik
+// yazilmiyor ama eski kayitlarla geriye donuk uyumluluk icin loadChildProfile
+// hala okuyor.)
 ipcMain.handle('progress:python-event', (event, lessonId, kind) => {
   if (!lessonId) return { ok: false };
   const entry = childProfile.pythonProgress[lessonId] || { attempts: 0, completed: false };
@@ -486,6 +659,11 @@ ipcMain.handle('progress:python-event', (event, lessonId, kind) => {
   saveChildProfile(childProfile);
   return { ok: true };
 });
+
+// GERCEKTEN eklendi (2026-09-11, Semih: "görevlerin seviyesi yaptıkça artsın") -
+// renderer'in ders listesini KİLİTLİ/AÇIK olarak gösterebilmesi icin kalici
+// ilerlemeyi geri okuyabilmesi gerekiyordu, önceden SADECE yazma ucu vardı.
+ipcMain.handle('progress:get-python', () => childProfile.pythonProgress || {});
 
 // ---------------------------------------------------------------
 // PIPER TTS ENTEGRASYONU
@@ -519,7 +697,170 @@ function piperAvailable() {
   return fs.existsSync(PIPER_EXE) && fs.existsSync(PIPER_MODEL);
 }
 
+// ---------------------------------------------------------------
+// FREYATTS ENTEGRASYONU (2026-09-11, Semih: "sesli konuşmayı düzgün şekilde
+// yapabilirsek... öğretmen ai nin çalıştığı laptopun sağlam bir ekran kartı
+// var" - Piper hic bagli degildi (asagidaki gibi, sadece dosyalar varsa
+// calisiyordu ama renderer hic cagirmiyordu), Chromium'un Linux'taki
+// speechSynthesis'i de yapisal olarak ses vermiyor. FreyaTTS-small (Turkce,
+// Apache-2.0, HuggingFace'ten 'freyavoice/freya-tts') bunun yerini alan
+// GERCEK yerel motor - Mihu STT ile AYNI "surekli Python sureci + JSON
+// stdin/stdout" deseni, cunku model yuklemesi ~7sn suruyor (GERCEKTEN
+// olculdu) ve her cumle icin yeniden yuklemek kabul edilemez derecede yavas
+// olurdu. Varsayilan ses "Leyla" (kadin, modelin TEK resmi/kilitli sesi) -
+// Semih farkli seed'ler denetip erkek ses aradi, tutarli/kaliteli bir
+// alternatif bulunamadi, "tamam bunu yukle" dedi (2026-09-11).
+//
+// HIZ/KALITE ODUNLESIMI (GERCEKTEN olculdu, bu CPU-only ortamda): steps=32
+// RTF 1.53 (gercek zamandan yavas), steps=16 RTF ~1.05 (sinirda, SECILEN
+// deger), steps=8 RTF 0.625, steps=4 RTF 0.54. Nephew'in NVIDIA'sinda cok
+// daha hizli olmasi beklenir ama olculmedi (bu ortamda GPU yok).
+//
+// KAPSAM (bkz. Mihu STT'deki AYNI not) - Mihu ile AYNI sinirlama: sadece
+// gelistirici modunda (npm start, Linux/macOS, PATH'teki 'python3' + kurulu
+// freyatts paketi) aktif. Windows (paketlenmis surum, GERCEK hedef) icin
+// embeddable-Python + pip bootstrap HENUZ yazilmadi/test edilmedi.
+// ---------------------------------------------------------------
+let freyaProcess = null;
+let freyaReady = null;
+let freyaRequestId = 0;
+const freyaPending = new Map();
+const FREYA_STEPS = 16;
+
+function freyaAvailableOnThisPlatform() {
+  return process.platform !== 'win32'; // bkz. yukaridaki KAPSAM notu
+}
+
+function startFreyaProcess() {
+  return new Promise((resolve) => {
+    const workerScript = [
+      'import sys, json',
+      'from freyatts import FreyaTTS',
+      'tts = FreyaTTS.from_pretrained("freyavoice/freya-tts", device="cpu")',
+      'sys.stdout.reconfigure(line_buffering=True)',
+      'print(json.dumps({"ready": True}))',
+      'for line in sys.stdin:',
+      '    line = line.strip()',
+      '    if not line:',
+      '        continue',
+      '    req = json.loads(line)',
+      '    try:',
+      '        wav = tts.synthesize(req["text"], steps=req.get("steps", 16))',
+      '        tts.save_wav(wav, req["outPath"])',
+      '        print(json.dumps({"id": req.get("id"), "ok": True}))',
+      '    except Exception as e:',
+      '        print(json.dumps({"id": req.get("id"), "ok": False, "error": str(e)}))'
+    ].join('\n');
+
+    let proc;
+    try {
+      // GERCEKTEN bulundu (2026-09-11 canli testte): 'freyatts' pip ile
+      // KURULU degil (FreyaTTS'in orijinal deposunda setup.py/pyproject.toml
+      // yok) - sadece repo klasorunun ICINDEN calistirildiginda Python'un
+      // "calisma dizinini sys.path'e ekle" davranisiyla bulunuyor. Electron'un
+      // KENDI calisma dizininden spawn edilince "ModuleNotFoundError" ile
+      // SESSIZCE basarisiz oluyordu (resolve(false), hicbir log yok).
+      // GERCEKTEN DUZELTILDI (2026-09-11): iki AYRI eksik vardi, ikisi de canli
+      // testte dogrulandi -
+      //  1) PYTHONPATH: FREYATTS_PATH hic ayarlanmamisti (npm start bunu set
+      //     etmiyor), bu yuzden import HER ZAMAN basarisiz oluyordu.
+      //  2) sistem 'python3'unde torch/freyatts bagimliliklari hic kurulu
+      //     degil (sadece deneme venv'inde kurulu) - PYTHONPATH duzeltilse
+      //     BILE sistem python'u "ModuleNotFoundError: torch" ile patlardi.
+      // Asagidaki varsayilanlar BU makinede dogrulanan calisan kombinasyon
+      // (venv python + PYTHONPATH) - env degiskenleri VARSA onlar kazanir,
+      // yoksa bu varsayilanlara dusulur. Baska bir makinede ikisi de yoksa
+      // eskisi gibi sistem python3'e duser (davranis degismez).
+      const freyaRepoPath = process.env.FREYATTS_PATH || '/home/aven/aven-voice-test/FreyaTTS';
+      const freyaPythonBin = process.env.FREYATTS_PYTHON || '/home/aven/aven-voice-test/.venv/bin/python3';
+      const pythonBin = fs.existsSync(freyaPythonBin) ? freyaPythonBin : 'python3';
+      const env = fs.existsSync(freyaRepoPath)
+        ? { ...process.env, PYTHONPATH: freyaRepoPath }
+        : process.env;
+      proc = spawn(pythonBin, ['-c', workerScript], { env });
+    } catch (e) {
+      console.error('FreyaTTS süreci başlatılamadı:', e.message);
+      resolve(false);
+      return;
+    }
+
+    let settled = false;
+    // Python tarafinda import/model-yukleme hatasi (ModuleNotFoundError,
+    // indirme hatasi vb.) olursa traceback BURAYA (stderr) duser - onceden
+    // hic okunmuyordu, bu yuzden "ready: false" disinda hicbir ipucu yoktu.
+    proc.stderr.on('data', (chunk) => console.error('[FreyaTTS stderr]', chunk.toString().trim()));
+    let buffer = '';
+    proc.stdout.on('data', (chunk) => {
+      buffer += chunk.toString();
+      let idx;
+      while ((idx = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 1);
+        if (!line) continue;
+        let msg;
+        try { msg = JSON.parse(line); } catch (e) { continue; }
+        if (msg.ready && !settled) {
+          settled = true;
+          freyaProcess = proc;
+          resolve(true);
+          continue;
+        }
+        const pending = freyaPending.get(msg.id);
+        if (pending) {
+          freyaPending.delete(msg.id);
+          if (msg.ok) pending.resolve();
+          else pending.reject(new Error(msg.error || 'FreyaTTS hatası'));
+        }
+      }
+    });
+    proc.on('error', () => { if (!settled) { settled = true; resolve(false); } });
+    proc.on('close', () => {
+      freyaProcess = null;
+      freyaReady = null;
+      for (const { reject } of freyaPending.values()) reject(new Error('FreyaTTS süreci kapandı'));
+      freyaPending.clear();
+      if (!settled) { settled = true; resolve(false); }
+    });
+    // Model yuklemesi ~7sn surebiliyor (GERCEKTEN olculdu) - ilk baslatmada
+    // makul bir ust sinir.
+    setTimeout(() => { if (!settled) { settled = true; resolve(false); } }, 30000);
+  });
+}
+
+function ensureFreyaReady() {
+  if (!freyaAvailableOnThisPlatform()) return Promise.resolve(false);
+  if (!freyaReady) freyaReady = startFreyaProcess();
+  return freyaReady;
+}
+
+function synthesizeWithFreya(text, outPath) {
+  return new Promise((resolve, reject) => {
+    if (!freyaProcess) { reject(new Error('FreyaTTS süreci hazır değil')); return; }
+    const id = ++freyaRequestId;
+    freyaPending.set(id, { resolve, reject });
+    freyaProcess.stdin.write(JSON.stringify({ id, text, steps: FREYA_STEPS, outPath }) + '\n');
+  });
+}
+
 ipcMain.handle('tts:speak', async (event, text) => {
+  console.log('[TANI] tts:speak cagrildi, metin:', JSON.stringify(text));
+  if (freyaAvailableOnThisPlatform()) {
+    const outFile = path.join(os.tmpdir(), `ogretmen-ai-freya-${Date.now()}.wav`);
+    try {
+      const ready = await ensureFreyaReady();
+      console.log('[TANI] Freya ready:', ready);
+      if (ready) {
+        await synthesizeWithFreya(text, outFile);
+        const audioBuffer = fs.readFileSync(outFile);
+        console.log('[TANI] Freya ses uretti, boyut:', audioBuffer.length);
+        return { ok: true, audioBase64: audioBuffer.toString('base64'), mime: 'audio/wav' };
+      }
+    } catch (e) {
+      console.error('[TANI] FreyaTTS denemesi başarısız, Piper/Chromium\'a düşülüyor:', e.message);
+    } finally {
+      fs.unlink(outFile, () => {});
+    }
+  }
   if (!piperAvailable()) {
     // Piper kurulu degil -> renderer tarafina "yok" bilgisini donuyoruz,
     // renderer bunun uzerine Chromium'un yerlesik sesine geri donecek.

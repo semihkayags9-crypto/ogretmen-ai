@@ -18,9 +18,6 @@ contextBridge.exposeInMainWorld('ogretmenAPI', {
   // Anahtarin kendisini renderer'a vermeden sadece durumunu bildirir ve kaydeder.
   getApiKeyStatus: () => ipcRenderer.invoke('settings:get-api-key-status'),
   saveApiKey: (apiKey) => ipcRenderer.invoke('settings:save-api-key', apiKey),
-  // Bir sablonun denendigini/tamamlandigini kalici cocuk-profiline bildirir
-  // (kind: 'attempt' | 'completed'). AI cagirmaz, aninda/ucretsiz.
-  reportTemplateProgress: (templateId, kind) => ipcRenderer.invoke('progress:template-event', templateId, kind),
   // Kaydedilmis bir ses parcasini (ArrayBuffer) Groq Whisper ile metne cevirir.
   // Electron'un icindeki ciplak Chromium'da webkitSpeechRecognition GUVENILIR
   // CALISMIYOR (Google'in bulut konusma servisi icin gereken API anahtari
@@ -33,5 +30,8 @@ contextBridge.exposeInMainWorld('ogretmenAPI', {
   getPythonStatus: () => ipcRenderer.invoke('python:get-status'),
   ensurePythonInstalled: () => ipcRenderer.invoke('python:ensure-installed'),
   runPythonCode: (code) => ipcRenderer.invoke('python:run-code', code),
-  reportPythonProgress: (lessonId, kind) => ipcRenderer.invoke('progress:python-event', lessonId, kind)
+  reportPythonProgress: (lessonId, kind) => ipcRenderer.invoke('progress:python-event', lessonId, kind),
+  // GERCEKTEN eklendi (2026-09-11, "görevlerin seviyesi yaptıkça artsın") -
+  // ders listesini kilitli/açık göstermek için kalıcı ilerlemeyi geri okur.
+  getPythonProgress: () => ipcRenderer.invoke('progress:get-python')
 });

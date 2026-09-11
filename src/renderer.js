@@ -1,7 +1,7 @@
 // renderer.js
-// 1) Basit Blockly blokları tanımlar (ileri git, dön, tekrar et, eğer)
-// 2) Karakteri metin tabanlı bir "sahnede" simüle eder
-// 4. Sohbet panelini (yazılı + sesli) AI köprüsüne bağlar
+// 1) Gerçek/çalıştırılabilir Python dersleri (bkz. PYTHON_LESSONS) sunar
+// 2) Sohbet panelini (yazılı + sesli) AI köprüsüne bağlar
+// (Blok Modu 2026-09-11'de kaldırıldı - "sadece python kalsın")
 
 // ---------------------------------------------------------------
 // 0. DİL (TR/EN) - kullanıcının açık isteği (2026-08-30): "İngilizceye
@@ -39,6 +39,10 @@ const UI_TEXT = {
     blockRepeatPrefix: 'şunu',
     blockRepeatSuffix: 'kere tekrarla',
     blockRepeatTooltip: 'İçindeki blokları belirtilen sayıda tekrarlar',
+    blockIfObstacle: 'eğer önünde engel varsa',
+    blockIfObstacleTooltip: 'İçindeki blokları SADECE karakterin hemen önünde bir engel varsa çalıştırır',
+    ifObstacleYesLog: '🔍 Önünde engel var, içindekini çalıştırıyorum.',
+    ifObstacleNoLog: '🔍 Önünde engel yok, atlıyorum.',
     chatHeaderTitle: '🧑‍🏫 Öğretmen AI',
     showRobotBtn: '🤖 Aven’i Göster',
     apiKeyBtn: '⚙ API Anahtarı',
@@ -103,6 +107,10 @@ const UI_TEXT = {
     blockRepeatPrefix: 'repeat this',
     blockRepeatSuffix: 'times',
     blockRepeatTooltip: 'Repeats the blocks inside a set number of times',
+    blockIfObstacle: 'if obstacle ahead',
+    blockIfObstacleTooltip: 'Runs the blocks inside ONLY IF there is an obstacle right in front of the character',
+    ifObstacleYesLog: '🔍 There is an obstacle ahead, running what\'s inside.',
+    ifObstacleNoLog: '🔍 No obstacle ahead, skipping.',
     chatHeaderTitle: '🧑‍🏫 Teacher AI',
     showRobotBtn: '🤖 Show Aven',
     apiKeyBtn: '⚙ API Key',
@@ -157,10 +165,6 @@ function applyUILanguage() {
   const setTitle = (id, key) => { const el = document.getElementById(id); if (el) el.title = uiText(key); };
   const setPlaceholder = (id, key) => { const el = document.getElementById(id); if (el) el.placeholder = uiText(key); };
 
-  const templateLabel = document.querySelector('label[for="templateSelect"]');
-  if (templateLabel) templateLabel.textContent = uiText('templateLabel');
-  setText('runBtn', 'runBtn');
-  setText('runHint', 'runHint');
   setText('showRobotBtn', 'showRobotBtn');
   setTitle('hideRobotBtn', 'hideRobotBtnTitle');
   setTitle('avenRobot', 'avenRobotAlt');
@@ -191,23 +195,14 @@ function applyUILanguage() {
   const voiceBtn = document.getElementById('voiceLangBtn');
   if (voiceBtn) { voiceBtn.textContent = uiText('voiceLangBtnLabel'); voiceBtn.title = uiText('voiceLangBtnTitle'); }
 
-  setText('blockModeTabBtn', 'blockModeTabLabel');
-  setText('pythonModeTabBtn', 'pythonModeTabLabel');
   const pythonLessonLabel = document.querySelector('label[for="pythonLessonSelect"]');
   if (pythonLessonLabel) pythonLessonLabel.textContent = uiText('pythonLessonLabel');
   setText('pythonRunBtn', 'pythonRunBtn');
   setText('pythonRunHint', 'pythonRunHint');
-  // Ders dropdown'ini yeni dilde yeniden olustur (sablon dropdown'iyla AYNI desen).
-  if (typeof pythonLessonSelect !== 'undefined' && pythonLessonSelect) {
-    const selectedId = currentPythonLesson ? currentPythonLesson.id : (PYTHON_LESSONS[0] && PYTHON_LESSONS[0].id);
-    pythonLessonSelect.innerHTML = '';
-    PYTHON_LESSONS.forEach((l) => {
-      const opt = document.createElement('option');
-      opt.value = l.id;
-      opt.innerText = pythonLessonText(l, 'name');
-      pythonLessonSelect.appendChild(opt);
-    });
-    pythonLessonSelect.value = selectedId;
+  // Ders dropdown'ini yeni dilde yeniden olustur - SADECE acilmis (kilitli
+  // olmayan) dersleri, secili dersi koruyarak (bkz. renderPythonLessonOptions).
+  if (typeof renderPythonLessonOptions === 'function') {
+    renderPythonLessonOptions(currentPythonLesson && currentPythonLesson.id);
   }
 
   if (typeof updateApiKeyButton === 'function') updateApiKeyButton();
@@ -216,461 +211,7 @@ function applyUILanguage() {
     micBtn.title = uiText('micBtnStartTitle');
   }
 
-  // Sablon dropdown'ini yeni dilde yeniden olustur, secili sablonu koru.
-  if (typeof templateSelect !== 'undefined' && templateSelect) {
-    const selectedId = currentTemplate ? currentTemplate.id : (TEMPLATES[0] && TEMPLATES[0].id);
-    templateSelect.innerHTML = '';
-    TEMPLATES.forEach((t) => {
-      const opt = document.createElement('option');
-      opt.value = t.id;
-      opt.innerText = templateText(t, 'name');
-      templateSelect.appendChild(opt);
-    });
-    templateSelect.value = selectedId;
-  }
-
-  // Zaten yerlestirilmis (calisma alanindaki) bloklarin etiketlerini de
-  // guncelle - flyout'taki (henuz surukleyip birakilmamis) bloklar zaten
-  // bir sonraki acilista init() ile yeni dilde olusturulacak.
-  if (typeof workspace !== 'undefined' && workspace && workspace.getAllBlocks) {
-    const labelKeyByType = { move_forward: 'blockForward', turn_around: 'blockTurn', jump: 'blockJump' };
-    workspace.getAllBlocks(false).forEach((block) => {
-      if (labelKeyByType[block.type]) {
-        const field = block.inputList[0] && block.inputList[0].fieldRow.find((f) => f instanceof Blockly.FieldLabel);
-        if (field) field.setValue(uiText(labelKeyByType[block.type]));
-      } else if (block.type === 'repeat_n') {
-        const labels = block.inputList[0] ? block.inputList[0].fieldRow.filter((f) => f instanceof Blockly.FieldLabel) : [];
-        if (labels[0]) labels[0].setValue(uiText('blockRepeatPrefix'));
-        if (labels[1]) labels[1].setValue(uiText('blockRepeatSuffix'));
-      }
-    });
-  }
 }
-
-// ---------------------------------------------------------------
-// 1. ÖZEL BLOKLAR
-// ---------------------------------------------------------------
-Blockly.Blocks['move_forward'] = {
-  init: function () {
-    this.appendDummyInput().appendField(uiText('blockForward'));
-    this.setPreviousStatement(true, null);
-    this.setNextStatement(true, null);
-    this.setColour(160);
-    this.setTooltip(uiText('blockForwardTooltip'));
-  }
-};
-
-Blockly.Blocks['turn_around'] = {
-  init: function () {
-    this.appendDummyInput().appendField(uiText('blockTurn'));
-    this.setPreviousStatement(true, null);
-    this.setNextStatement(true, null);
-    this.setColour(160);
-    this.setTooltip(uiText('blockTurnTooltip'));
-  }
-};
-
-Blockly.Blocks['jump'] = {
-  init: function () {
-    this.appendDummyInput().appendField(uiText('blockJump'));
-    this.setPreviousStatement(true, null);
-    this.setNextStatement(true, null);
-    this.setColour(160);
-    this.setTooltip(uiText('blockJumpTooltip'));
-  }
-};
-
-Blockly.Blocks['repeat_n'] = {
-  init: function () {
-    this.appendDummyInput()
-      .appendField(uiText('blockRepeatPrefix'))
-      .appendField(new Blockly.FieldNumber(3, 1, 20), 'TIMES')
-      .appendField(uiText('blockRepeatSuffix'));
-    this.appendStatementInput('DO').setCheck(null);
-    this.setPreviousStatement(true, null);
-    this.setNextStatement(true, null);
-    this.setColour(210);
-    this.setTooltip(uiText('blockRepeatTooltip'));
-  }
-};
-
-// ---------------------------------------------------------------
-// 2. WORKSPACE KURULUMU
-// ---------------------------------------------------------------
-const toolbox = {
-  kind: 'flyoutToolbox',
-  contents: [
-    { kind: 'block', type: 'move_forward' },
-    { kind: 'block', type: 'turn_around' },
-    { kind: 'block', type: 'jump' },
-    { kind: 'block', type: 'repeat_n' }
-  ]
-};
-
-const workspace = Blockly.inject('blocklyDiv', {
-  toolbox: toolbox,
-  trashcan: true,
-  scrollbars: true,
-  renderer: 'zelos',
-  // Çocukların blokları rahatça görüp sürükleyebilmesi için çalışma alanını büyüt.
-  zoom: { controls: true, wheel: true, startScale: 1.35, minScale: 0.9, maxScale: 2.5, scaleSpeed: 1.2 }
-});
-
-// ---------------------------------------------------------------
-// 3. ŞABLON SİSTEMİ
-// Her şablon bir "seviye/senaryo" tanımıdır: karakterin başlangıç
-// konumu/yönü, ızgara boyutu, varsa bir hedef bayrağı ve kısa bir
-// açıklama. Aven (ya da sen) yeğenin seviyesine göre yeni şablonlar
-// öğretebilir/ekleyebilir — tek yapılması gereken bu diziye aynı
-// formatta yeni bir obje eklemek. Şimdilik birkaç örnekle başlıyor,
-// mimari onlarcasını taşıyacak şekilde kuruldu.
-// ---------------------------------------------------------------
-const TEMPLATES = [
-  {
-    id: 'duz-yol',
-    name: '1) Düz Yol — İleriye Yürü',
-    nameEn: '1) Straight Road — Walk Forward',
-    cols: 8, rows: 6,
-    start: { x: 1, y: 3, angle: 0 },   // angle: 0=sağ, 90=aşağı, 180=sol, 270=yukarı
-    goal: { x: 6, y: 3 },
-    hint: 'Karakteri sadece "ileri git" bloklarıyla bayrağa ulaştır.',
-    hintEn: 'Get the character to the flag using only "move forward" blocks.'
-  },
-  {
-    id: 'kose-donme',
-    name: '2) Köşeyi Dön',
-    nameEn: '2) Turn the Corner',
-    cols: 8, rows: 6,
-    start: { x: 1, y: 1, angle: 0 },
-    goal: { x: 6, y: 4 },
-    hint: 'Önce ileri git, sonra "dön" bloğunu kullan, sonra tekrar ileri git.',
-    hintEn: 'First move forward, then use the "turn" block, then move forward again.'
-  },
-  {
-    id: 'tekrar-pratigi',
-    name: '3) Tekrar Bloğu Pratiği',
-    nameEn: '3) Repeat Block Practice',
-    cols: 8, rows: 6,
-    start: { x: 0, y: 5, angle: 270 },
-    goal: { x: 0, y: 0 },
-    hint: '"N kere tekrarla" bloğunu kullanarak daha az blokla hedefe ulaş.',
-    hintEn: 'Reach the goal with fewer blocks using the "repeat N times" block.'
-  },
-  {
-    id: 'engelli-parkur',
-    name: '4) Engelli Parkur — Zıpla',
-    nameEn: '4) Obstacle Course — Jump',
-    cols: 8, rows: 6,
-    start: { x: 1, y: 3, angle: 0 },
-    goal: { x: 6, y: 3 },
-    obstacle: { x: 4, y: 3 },
-    hint: 'Engelin üstünden geçmek için tam önünde "zıpla" bloğunu kullan.',
-    hintEn: 'Use the "jump" block right in front of the obstacle to get over it.'
-  },
-  {
-    id: 'serbest-alan',
-    name: '5) Serbest Alan (hedef yok)',
-    nameEn: '5) Free Play (no goal)',
-    cols: 8, rows: 6,
-    start: { x: 4, y: 3, angle: 0 },
-    goal: null,
-    hint: 'Hedef yok, istediğin gibi deneme yapabilirsin.',
-    hintEn: 'No goal here — try anything you like.'
-  },
-  {
-    id: 'cift-kose',
-    name: '6) Çift Köşe — S Yolu',
-    nameEn: '6) Double Turn — S Path',
-    cols: 8, rows: 6,
-    start: { x: 1, y: 1, angle: 0 },
-    goal: { x: 2, y: 3 },
-    hint: 'Bu sefer İKİ köşe var: önce ileri git, dön, tekrar ileri git, tekrar dön, sonra ileri git.',
-    hintEn: 'This time there are TWO corners: move forward, turn, move forward again, turn again, then move forward.'
-  },
-  {
-    id: 'uzun-tekrar',
-    name: '7) Uzun Tekrar — Büyük Yol',
-    nameEn: '7) Long Repeat — Big Road',
-    cols: 10, rows: 6,
-    start: { x: 0, y: 2, angle: 0 },
-    goal: { x: 9, y: 2 },
-    hint: 'Bu yol çok uzun — tek tek "ileri git" eklemek yerine "N kere tekrarla" bloğunun içine bir "ileri git" koy.',
-    hintEn: 'This road is very long — instead of adding "move forward" one by one, put a single "move forward" inside a "repeat N times" block.'
-  },
-  {
-    id: 'cifte-engel',
-    name: '8) Çifte Engel — İki Kere Zıpla',
-    nameEn: '8) Double Obstacle — Jump Twice',
-    cols: 8, rows: 6,
-    start: { x: 0, y: 3, angle: 0 },
-    goal: { x: 7, y: 3 },
-    obstacles: [{ x: 2, y: 3 }, { x: 5, y: 3 }],
-    hint: 'Yolda İKİ engel var — her birinin tam önünde "zıpla" bloğunu kullanman gerekiyor.',
-    hintEn: 'There are TWO obstacles on the road — use the "jump" block right in front of each one.'
-  },
-  {
-    id: 'kare-tur',
-    name: '9) Kare Tur — Başladığın Yere Dön',
-    nameEn: '9) Square Tour — Back to Start',
-    cols: 8, rows: 6,
-    start: { x: 1, y: 1, angle: 0 },
-    goal: { x: 1, y: 1 },
-    hint: '"N kere tekrarla" bloğunun içine "ileri git, ileri git, dön" koy ve 4 kere tekrarlat — kare çizip başladığın yere dönersin.',
-    hintEn: 'Put "move forward, move forward, turn" inside a "repeat N times" block set to 4 — you\'ll draw a square and return to where you started.'
-  },
-  {
-    id: 'zipla-don-karisik',
-    name: '10) Zıpla + Dön Karışık Parkur',
-    nameEn: '10) Mixed Jump + Turn Course',
-    cols: 8, rows: 6,
-    start: { x: 1, y: 1, angle: 0 },
-    goal: { x: 1, y: 4 },
-    obstacles: [{ x: 3, y: 3 }],
-    hint: 'Hem "dön" hem "zıpla" bloğuna ihtiyacın olacak — önce köşeyi dön, sonra engelin önünde zıpla, sonra tekrar dön.',
-    hintEn: 'You\'ll need both "turn" and "jump" — turn the corner first, then jump in front of the obstacle, then turn again.'
-  }
-];
-
-function templateText(tpl, field) {
-  if (voiceLanguage === 'en-US') return tpl[field + 'En'] || tpl[field];
-  return tpl[field];
-}
-
-let currentTemplate = TEMPLATES[0];
-let charState = { x: 0, y: 0, angle: 0 };
-let goalReached = false;
-
-// ---------------------------------------------------------------
-// 4. CANVAS ÇİZİMİ
-// ---------------------------------------------------------------
-const canvas = document.getElementById('stageCanvas');
-const ctx = canvas.getContext('2d');
-const stageMsgEl = document.getElementById('stageMsg');
-const stageLogEl = document.getElementById('stageLog');
-
-function cellSize() {
-  return Math.min(
-    canvas.width / currentTemplate.cols,
-    canvas.height / currentTemplate.rows
-  );
-}
-
-function drawScene() {
-  const cs = cellSize();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // ızgara
-  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-  for (let c = 0; c <= currentTemplate.cols; c++) {
-    ctx.beginPath();
-    ctx.moveTo(c * cs, 0);
-    ctx.lineTo(c * cs, currentTemplate.rows * cs);
-    ctx.stroke();
-  }
-  for (let r = 0; r <= currentTemplate.rows; r++) {
-    ctx.beginPath();
-    ctx.moveTo(0, r * cs);
-    ctx.lineTo(currentTemplate.cols * cs, r * cs);
-    ctx.stroke();
-  }
-
-  // engel(ler)
-  const obstacles = templateObstacles(currentTemplate);
-  if (obstacles.length > 0) {
-    ctx.font = `${cs * 0.7}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    for (const o of obstacles) ctx.fillText('🧱', o.x * cs + cs / 2, o.y * cs + cs / 2);
-  }
-
-  // hedef bayrağı
-  if (currentTemplate.goal) {
-    ctx.font = `${cs * 0.7}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('🚩', currentTemplate.goal.x * cs + cs / 2, currentTemplate.goal.y * cs + cs / 2);
-  }
-
-  // karakter (yön okuyla)
-  const cx = charState.x * cs + cs / 2;
-  const cy = charState.y * cs + cs / 2;
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate((charState.angle * Math.PI) / 180);
-  ctx.font = `${cs * 0.7}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText('🚗', 0, 0); // basit karakter ikonu; sonradan sprite ile degistirilebilir
-  ctx.restore();
-}
-
-function resetCharacter() {
-  charState = { ...currentTemplate.start };
-  goalReached = false;
-  stageMsgEl.innerText = '';
-  stageLogEl.innerHTML = '';
-  drawScene();
-}
-
-function loadTemplate(id) {
-  const tpl = TEMPLATES.find(t => t.id === id) || TEMPLATES[0];
-  currentTemplate = tpl;
-  resetCharacter();
-  if (tpl.hint) {
-    log(`💡 ${templateText(tpl, 'hint')}`);
-  }
-}
-
-const templateSelect = document.getElementById('templateSelect');
-TEMPLATES.forEach(t => {
-  const opt = document.createElement('option');
-  opt.value = t.id;
-  opt.innerText = templateText(t, 'name');
-  templateSelect.appendChild(opt);
-});
-templateSelect.addEventListener('change', () => loadTemplate(templateSelect.value));
-
-// ---------------------------------------------------------------
-// 5. ÇALIŞTIRICI (interpreter) — bloklara göre karakteri GERÇEKTEN
-// ızgara üzerinde hareket ettirir, her adımda kısa bir animasyon
-// gecikmesiyle canvas'ı yeniden çizer.
-// ---------------------------------------------------------------
-function log(line) {
-  const div = document.createElement('div');
-  div.innerText = line;
-  stageLogEl.appendChild(div);
-  stageLogEl.scrollTop = stageLogEl.scrollHeight;
-}
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Bazi sablonlarda TEK engel (obstacle: {x,y}), bazilarinda BIRDEN FAZLA
-// engel (obstacles: [{x,y}, ...]) olabilir - eskiyle geriye donuk uyumlu
-// tek bir liste dondurur, tum engel kontrolleri buradan gecer.
-function templateObstacles(tpl) {
-  if (Array.isArray(tpl.obstacles)) return tpl.obstacles;
-  if (tpl.obstacle) return [tpl.obstacle];
-  return [];
-}
-
-function angleToDelta(angle) {
-  switch (((angle % 360) + 360) % 360) {
-    case 0: return { dx: 1, dy: 0 };
-    case 90: return { dx: 0, dy: 1 };
-    case 180: return { dx: -1, dy: 0 };
-    case 270: return { dx: 0, dy: -1 };
-    default: return { dx: 0, dy: 0 };
-  }
-}
-
-function checkGoal() {
-  const g = currentTemplate.goal;
-  if (g && !goalReached && charState.x === g.x && charState.y === g.y) {
-    goalReached = true;
-    stageMsgEl.innerText = uiText('goalReachedMsg');
-    log(uiText('goalReachedLog'));
-    // Cocuk-profiline kalici olarak yazilsin - Aven bu sablonu artik
-    // bildigini hatirlasin (bir sonraki oturumda bile).
-    window.ogretmenAPI.reportTemplateProgress(currentTemplate.id, 'completed');
-  }
-}
-
-async function runBlock(block) {
-  if (!block) return;
-  switch (block.type) {
-    case 'move_forward': {
-      const { dx, dy } = angleToDelta(charState.angle);
-      const nx = charState.x + dx;
-      const ny = charState.y + dy;
-      const inBounds = nx >= 0 && nx < currentTemplate.cols && ny >= 0 && ny < currentTemplate.rows;
-      const blockedByObstacle = templateObstacles(currentTemplate).some((o) => o.x === nx && o.y === ny);
-      if (!inBounds) {
-        log(uiText('bumpLog'));
-      } else if (blockedByObstacle) {
-        log(uiText('obstacleAheadLog'));
-      } else {
-        charState.x = nx;
-        charState.y = ny;
-        log(uiText('forwardLog'));
-      }
-      drawScene();
-      checkGoal();
-      await sleep(400);
-      break;
-    }
-    case 'turn_around':
-      charState.angle = (charState.angle + 90) % 360;
-      log(uiText('turnLog'));
-      drawScene();
-      await sleep(300);
-      break;
-    case 'jump': {
-      // Basit ziplama animasyonu: konum degismez, kisa bir "hop" gosterilir
-      const cs = cellSize();
-      const cx = charState.x * cs + cs / 2;
-      const cy = charState.y * cs + cs / 2;
-      for (const offset of [-10, -18, -10, 0]) {
-        drawScene();
-        ctx.save();
-        ctx.font = `${cs * 0.7}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('🚗', cx, cy + offset);
-        ctx.restore();
-        await sleep(80);
-      }
-      // Engelin tam onundeyse ve zipladiysa, engeli asip bir hucre ilerlet
-      const { dx, dy } = angleToDelta(charState.angle);
-      const ahead = { x: charState.x + dx, y: charState.y + dy };
-      const obstacleAhead = templateObstacles(currentTemplate).some((o) => o.x === ahead.x && o.y === ahead.y);
-      if (obstacleAhead) {
-        charState.x = ahead.x + dx;
-        charState.y = ahead.y + dy;
-        log(uiText('jumpObstacleLog'));
-      } else {
-        log(uiText('jumpLog'));
-      }
-      drawScene();
-      checkGoal();
-      await sleep(200);
-      break;
-    }
-    case 'repeat_n': {
-      const times = block.getFieldValue('TIMES');
-      const inner = block.getInputTargetBlock('DO');
-      log(`🔁  ${times} kere tekrar başlıyor...`);
-      for (let i = 0; i < times; i++) {
-        await runBlock(inner);
-      }
-      break;
-    }
-    default:
-      break;
-  }
-  await runBlock(block.getNextBlock());
-}
-
-const runBtn = document.getElementById('runBtn');
-
-runBtn.addEventListener('click', async () => {
-  resetCharacter();
-  const topBlocks = workspace.getTopBlocks(true);
-  if (topBlocks.length === 0) {
-    log(uiText('noBlocks'));
-    return;
-  }
-  runBtn.disabled = true;
-  window.ogretmenAPI.reportTemplateProgress(currentTemplate.id, 'attempt');
-  for (const block of topBlocks) {
-    await runBlock(block);
-  }
-  runBtn.disabled = false;
-});
-
-// İlk şablonu yükle ve sahneyi çiz
-loadTemplate(TEMPLATES[0].id);
 
 // ---------------------------------------------------------------
 // 6. SOHBET PANELİ (yazılı + sesli)
@@ -687,6 +228,9 @@ const apiKeyStatus = document.getElementById('apiKeyStatus');
 const cancelApiKeyBtn = document.getElementById('cancelApiKeyBtn');
 const teacherStage = document.getElementById('teacherStage');
 const teacherSpeech = document.getElementById('teacherSpeech');
+const teacherBubble = document.getElementById('teacherBubble');
+const voiceWaveWrap = document.getElementById('voiceWaveWrap');
+const voiceWaveCanvas = document.getElementById('voiceWaveCanvas');
 const hideRobotBtn = document.getElementById('hideRobotBtn');
 const showRobotBtn = document.getElementById('showRobotBtn');
 const avenRobot = document.getElementById('avenRobot');
@@ -781,6 +325,90 @@ let isSpeaking = false;    // AI şu an TTS ile konuşuyor mu
 let microphoneStream = null;
 let microphoneSetup = null;
 
+// ---------------------------------------------------------------
+// SESLİ MOD GÖRSEL DAVRANIŞI (2026-09-11, Semih: "sesli konuşmaya
+// geçtiğimizde mesajların görünmemesini sağla, ses dalga efekti koy,
+// sesi kapatınca sesli sohbetteki konuşmalar yazılı olarak görülebilir
+// ama konuşurken değil") - mesajlar chatLog'dan hiç SİLİNMİYOR, addMessage
+// eskisi gibi normal ekliyor; sadece CSS ile gizleniyor. Bu yüzden mod
+// kapanınca TÜM sesli sohbet geçmişi ekstra bir buffer/senkron
+// gerektirmeden otomatik olarak görünür hale geliyor.
+// ---------------------------------------------------------------
+const voiceWaveCtx = voiceWaveCanvas.getContext('2d');
+let sharedAudioCtx = null;
+let micAnalyser = null;
+let ttsAnalyser = null;
+let waveLoopRunning = false;
+
+function getSharedAudioCtx() {
+  if (!sharedAudioCtx) sharedAudioCtx = new AudioContext();
+  return sharedAudioCtx;
+}
+
+async function ensureMicAnalyser() {
+  if (micAnalyser) return micAnalyser;
+  if (!await prepareMicrophone()) return null;
+  const ctx = getSharedAudioCtx();
+  const source = ctx.createMediaStreamSource(microphoneStream);
+  micAnalyser = ctx.createAnalyser();
+  micAnalyser.fftSize = 256;
+  source.connect(micAnalyser);
+  return micAnalyser;
+}
+
+// speak() icinde AI'nin konusma sesi (Audio elementi) olusturulunca cagrilir -
+// dalga GERCEK oynatma sesini yansitsin diye (sabit/sahte bir animasyon degil).
+function attachTtsAnalyser(audioEl) {
+  try {
+    const ctx = getSharedAudioCtx();
+    const source = ctx.createMediaElementSource(audioEl);
+    ttsAnalyser = ctx.createAnalyser();
+    ttsAnalyser.fftSize = 256;
+    source.connect(ttsAnalyser);
+    // createMediaElementSource baglaninca tarayici ses cikisini BU graph'a
+    // yonlendirir - destination'a baglamazsak ses hoparlore hic gitmez,
+    // sessizce kaybolur.
+    ttsAnalyser.connect(ctx.destination);
+  } catch (e) {
+    ttsAnalyser = null;
+  }
+}
+
+function drawVoiceWave() {
+  if (!voiceModeOn) { waveLoopRunning = false; return; }
+  requestAnimationFrame(drawVoiceWave);
+  const analyser = (isSpeaking && ttsAnalyser) ? ttsAnalyser : micAnalyser;
+  const w = voiceWaveCanvas.width, h = voiceWaveCanvas.height;
+  voiceWaveCtx.clearRect(0, 0, w, h);
+  if (!analyser) return;
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  analyser.getByteFrequencyData(data);
+  const barCount = 28;
+  const step = Math.max(1, Math.floor(data.length / barCount));
+  const barWidth = w / barCount;
+  voiceWaveCtx.fillStyle = isSpeaking ? '#3f6fd1' : '#e0546a';
+  for (let i = 0; i < barCount; i++) {
+    const v = data[i * step] / 255;
+    const barH = Math.max(3, v * h);
+    voiceWaveCtx.fillRect(i * barWidth + 1, (h - barH) / 2, barWidth - 2, barH);
+  }
+}
+
+function setVoiceUiMode(on) {
+  if (on) {
+    chatLog.classList.add('voice-hidden');
+    teacherBubble.classList.add('voice-hidden');
+    voiceWaveWrap.classList.add('active');
+    ensureMicAnalyser();
+    if (!waveLoopRunning) { waveLoopRunning = true; requestAnimationFrame(drawVoiceWave); }
+  } else {
+    chatLog.classList.remove('voice-hidden');
+    teacherBubble.classList.remove('voice-hidden');
+    voiceWaveWrap.classList.remove('active');
+    chatLog.scrollTop = chatLog.scrollHeight;
+  }
+}
+
 async function prepareMicrophone() {
   if (microphoneStream?.active) return true;
   if (!navigator.mediaDevices?.getUserMedia) return true;
@@ -871,19 +499,43 @@ function chooseWindowsVoice(language) {
     || matching[0];
 }
 
-function speak(text, onDone) {
+async function speak(text, onDone) {
   isSpeaking = true;
   teacherStage.classList.add('speaking');
   requestAnimationFrame(() => animateTalking(performance.now()));
 
-  // Windows'ta kurulu Microsoft sesini doğrudan kullan. Böylece Türkçe ve
-  // İngilizce yanıtlar kendi diline uygun sesle okunur; Piper Türkçe modeli
-  // İngilizce metni doğal okuyamadığı için varsayılan değildir.
-  speakWithChromium(text, () => {
+  const finish = () => {
     isSpeaking = false;
     teacherStage.classList.remove('speaking');
     if (onDone) onDone();
-  });
+  };
+
+  // GERCEKTEN eklendi (2026-09-11, Semih: "ses gelmiyor... sesli konuşmayı
+  // düzgün yapabilirsek" - window.ogretmenAPI.speak KOPRUSU onceden vardi
+  // ama BURADAN HIC CAGRILMIYORDU, dogrudan Chromium'a gidiliyordu; Chromium
+  // Linux'ta zaten sessiz kaliyor - bkz. main.js'teki FREYATTS ENTEGRASYONU
+  // yorumu). FreyaTTS SADECE Turkce icin denenir (Piper'daki AYNI kisit -
+  // Turkce modeli Ingilizce'yi dogal okuyamiyor), Ingilizce ya da FreyaTTS
+  // basarisiz/kurulu degilse Chromium'a (Windows'ta Microsoft sesi) duser.
+  const language = detectSpeechLanguage(text);
+  console.log('[TANI] speak() cagrildi, dil:', language);
+  if (language === 'tr-TR') {
+    try {
+      const result = await window.ogretmenAPI.speak(text);
+      console.log('[TANI] ogretmenAPI.speak sonucu:', result && result.ok, result && result.mime, result && result.audioBase64 && result.audioBase64.length);
+      if (result && result.ok && result.audioBase64) {
+        const audio = new Audio(`data:${result.mime || 'audio/wav'};base64,${result.audioBase64}`);
+        attachTtsAnalyser(audio);
+        audio.onended = finish;
+        audio.onerror = (e) => { console.log('[TANI] audio.onerror', e); speakWithChromium(text, finish); };
+        await audio.play().catch((e) => { console.log('[TANI] audio.play() reddedildi:', e.message); speakWithChromium(text, finish); });
+        return;
+      }
+    } catch (e) {
+      console.log('[TANI] speak() catch:', e.message);
+    }
+  }
+  speakWithChromium(text, finish);
 }
 
 // Yedek/varsayilan ses: Windows/Chromium'un yerlesik ucretsiz sesi.
@@ -914,10 +566,14 @@ if ('speechSynthesis' in window) {
 
 // ---------------------------------------------------------------
 // PYTHON MODU - kullanicinin acik istegi (2026-08-31): "python kullanimi ve
-// egitimi cok onemli... ai ogretmen otomatik python indirip kursun". TEMPLATES/
-// loadTemplate/templateSelect ile YAPISAL OLARAK AYNI desen (bkz. yukarida) -
-// kucuk, sabit bir mufredat listesi; kalici ilerleme childProfile.pythonProgress'te
-// (main.js) tutulur, AYNI load/save fonksiyonlariyla.
+// egitimi cok onemli... ai ogretmen otomatik python indirip kursun". Kucuk,
+// sabit bir mufredat listesi; kalici ilerleme childProfile.pythonProgress'te
+// (main.js) tutulur.
+// GERCEKTEN genisletildi (2026-09-11, Semih: "blok modunu kaldır, sadece
+// python kalsın, şablonları arttır, görevlerin seviyesi yaptıkça artsın") -
+// liste/sozluk/while/fonksiyon eklendi, listede SIRAYLA artan zorluk var ve
+// (bkz. asagidaki unlockedPythonLessons) bir sonraki ders SADECE bir onceki
+// tamamlaninca acilir - cocuk zorluk sirasini atlayamaz.
 // ---------------------------------------------------------------
 const PYTHON_LESSONS = [
   {
@@ -945,25 +601,113 @@ const PYTHON_LESSONS = [
     starterCode: 'yas = 8\nprint(yas + 1)'
   },
   {
+    id: 'metin-birlestir',
+    name: '4) Metinleri Birleştir',
+    nameEn: '4) Join Two Words',
+    hint: '"Ali" ve "Kaya" yerine kendi adını/soyadını yaz, ne olduğunu gör.',
+    hintEn: 'Change "Ali" and "Kaya" to your own name, see what happens.',
+    starterCode: 'ad = "Ali"\nsoyad = "Kaya"\nprint(ad + " " + soyad)'
+  },
+  {
     id: 'tekrar-et',
-    name: '4) Tekrar Et',
-    nameEn: '4) Repeat It',
-    hint: 'Blok Modu\'ndaki "N kere tekrarla" bloğunun GERÇEK Python hali budur.',
-    hintEn: 'This is the REAL Python version of the "repeat N times" block from Block Mode.',
+    name: '5) Tekrar Et',
+    nameEn: '5) Repeat It',
+    hint: '5 sayısını değiştir, "Merhaba!" kaç kere yazdırıldığına bak.',
+    hintEn: 'Change the number 5, see how many times "Merhaba!" gets printed.',
     starterCode: 'for i in range(5):\n    print("Merhaba!")'
   },
   {
     id: 'eger',
-    name: '5) Eğer',
-    nameEn: '5) If',
-    hint: 'Blok Modu\'ndaki "eğer" fikri - yaşı değiştirip her iki durumu da dene.',
-    hintEn: 'The "if" idea from Block Mode - change the age and try both cases.',
+    name: '6) Eğer',
+    nameEn: '6) If',
+    hint: 'Yaşı değiştirip her iki durumu da dene (8\'den küçük ve büyük).',
+    hintEn: 'Change the age and try both cases (under and over 8).',
     starterCode: 'yas = 8\nif yas >= 8:\n    print("Kodlamaya hazırsın!")\nelse:\n    print("Neredeyse hazırsın!")'
   },
   {
+    id: 'carpim-tablosu',
+    name: '7) Çarpım Tablosu',
+    nameEn: '7) Multiplication Table',
+    hint: '"sayi" değişkenini değiştir, çarpım tablosunun nasıl değiştiğini gör.',
+    hintEn: 'Change the "sayi" (number) variable and see how the multiplication table changes.',
+    starterCode: 'sayi = 3\nfor i in range(1, 6):\n    print(sayi * i)'
+  },
+  {
+    id: 'ic-ice-tekrar',
+    name: '8) İç İçe Tekrar',
+    nameEn: '8) Nested Repeat',
+    hint: 'Bu kod TOPLAM kaç kere "Merhaba!" yazdırır? "kat" ya da "adet" sayısını değiştirip dene.',
+    hintEn: 'How many times does this print "Merhaba!" in TOTAL? Try changing the "kat" or "adet" numbers.',
+    starterCode: 'for kat in range(3):\n    for adet in range(2):\n        print("Merhaba!")'
+  },
+  {
+    id: 'sayac',
+    name: '9) Sayaç — Çift mi Tek mi',
+    nameEn: '9) Counter — Even or Odd',
+    hint: '1\'den 10\'a kadar her sayı için çift mi tek mi olduğunu yazdırır. Son sayıyı (11) değiştirip dene.',
+    hintEn: 'Prints whether each number from 1 to 10 is even or odd. Try changing the last number (11).',
+    starterCode: 'for sayi in range(1, 11):\n    if sayi % 2 == 0:\n        print(sayi, "çift")\n    else:\n        print(sayi, "tek")'
+  },
+  {
+    id: 'listeyle-tanis',
+    name: '10) Listeyle Tanış',
+    nameEn: '10) Meet Lists',
+    hint: 'Listeye kendi sevdiğin bir meyveyi ekle (virgülle ayırıp tırnak içinde), tekrar çalıştır.',
+    hintEn: 'Add your favorite fruit to the list (comma-separated, in quotes), run again.',
+    starterCode: 'meyveler = ["elma", "armut", "muz"]\nfor meyve in meyveler:\n    print(meyve)'
+  },
+  {
+    id: 'liste-toplami',
+    name: '11) Liste Toplamı',
+    nameEn: '11) Sum a List',
+    hint: 'Listeye yeni bir sayı ekle, toplamın nasıl değiştiğini gör.',
+    hintEn: 'Add a new number to the list, see how the total changes.',
+    starterCode: 'sayilar = [4, 8, 15, 16]\ntoplam = 0\nfor sayi in sayilar:\n    toplam = toplam + sayi\nprint(toplam)'
+  },
+  {
+    id: 'geri-sayim',
+    name: '12) Geri Sayım (while)',
+    nameEn: '12) Countdown (while)',
+    hint: '5 sayısını değiştir, geri sayımın nereden başladığını gör.',
+    hintEn: 'Change the number 5, see where the countdown starts.',
+    starterCode: 'sayac = 5\nwhile sayac > 0:\n    print(sayac)\n    sayac = sayac - 1\nprint("Başla!")'
+  },
+  {
+    id: 'kendi-fonksiyonun',
+    name: '13) Kendi Fonksiyonun',
+    nameEn: '13) Your Own Function',
+    hint: '"Zeynep" yerine kendi adını yaz, fonksiyonu tekrar çağır.',
+    hintEn: 'Change "Zeynep" to your own name, call the function again.',
+    starterCode: 'def selamla(isim):\n    print("Merhaba " + isim + "!")\n\nselamla("Zeynep")'
+  },
+  {
+    id: 'sozlukle-tanis',
+    name: '14) Sözlükle Tanış',
+    nameEn: '14) Meet Dictionaries',
+    hint: '"seviye" değerini değiştir, çıktının nasıl değiştiğini gör.',
+    hintEn: 'Change the "seviye" (level) value, see how the output changes.',
+    starterCode: 'oyuncu = {"isim": "Ege", "seviye": 3}\nprint(oyuncu["isim"])\nprint(oyuncu["seviye"])'
+  },
+  {
+    id: 'en-buyugu-bul',
+    name: '15) En Büyüğü Bul',
+    nameEn: '15) Find the Biggest',
+    hint: 'Listeye daha büyük bir sayı ekle, en büyüğün değişip değişmediğini gör.',
+    hintEn: 'Add a bigger number to the list, see if the biggest one changes.',
+    starterCode: 'sayilar = [12, 45, 3, 89, 22]\nen_buyuk = sayilar[0]\nfor sayi in sayilar:\n    if sayi > en_buyuk:\n        en_buyuk = sayi\nprint(en_buyuk)'
+  },
+  {
+    id: 'notlarin-ortalamasi',
+    name: '16) Mini Görev: Notların Ortalaması',
+    nameEn: '16) Mini Project: Grade Average',
+    hint: 'Kendi notlarını listeye yaz, ortalamanın nasıl değiştiğini gör. Bu, öğrendiğin HER ŞEYİ (fonksiyon, liste, tekrar) bir araya getiriyor!',
+    hintEn: 'Put your own grades in the list, see the average change. This combines EVERYTHING you learned (function, list, loop)!',
+    starterCode: 'def ortalama_hesapla(notlar):\n    toplam = 0\n    for not_ in notlar:\n        toplam = toplam + not_\n    return toplam / len(notlar)\n\nnotlarim = [80, 90, 70, 100]\nprint(ortalama_hesapla(notlarim))'
+  },
+  {
     id: 'kendi-kodun',
-    name: '6) Kendi Kodun (serbest)',
-    nameEn: '6) Your Own Code (free)',
+    name: '17) Kendi Kodun (serbest)',
+    nameEn: '17) Your Own Code (free)',
     hint: 'Hedef yok, istediğin gibi deneme yapabilirsin.',
     hintEn: 'No goal here — try anything you like.',
     starterCode: ''
@@ -976,24 +720,62 @@ function pythonLessonText(lesson, field) {
 }
 
 let currentPythonLesson = PYTHON_LESSONS[0];
-let currentMode = 'blockly'; // 'blockly' | 'python' - sendToAI'nin hangi ogretmen kimligini istedigini belirler
+// Blok Modu kaldırıldı (2026-09-11, Semih: "blok modunu kaldır, sadece python
+// kalsın") - artık tek öğretmen kimliği var, ama askAI'nin imzasını (mode
+// parametresi, bkz. main.js buildSystemPrompt) değiştirmeye gerek yok.
+const currentMode = 'python';
 let pythonInstallChecked = false;
 
 const pythonLessonSelect = document.getElementById('pythonLessonSelect');
 const pythonCodeInput = document.getElementById('pythonCodeInput');
 const pythonOutput = document.getElementById('pythonOutput');
 const pythonRunBtn = document.getElementById('pythonRunBtn');
-const blockModeTabBtn = document.getElementById('blockModeTabBtn');
-const pythonModeTabBtn = document.getElementById('pythonModeTabBtn');
-const blockModePanel = document.getElementById('blockModePanel');
-const pythonArea = document.getElementById('pythonArea');
 
-PYTHON_LESSONS.forEach((l) => {
-  const opt = document.createElement('option');
-  opt.value = l.id;
-  opt.innerText = pythonLessonText(l, 'name');
-  pythonLessonSelect.appendChild(opt);
-});
+// ---------------------------------------------------------------
+// DERS KİLİDİ / SEVİYE İLERLEMESİ (2026-09-11, Semih: "görevlerin seviyesi
+// yaptıkça artsın") - dersler SIRAYLA açılır: bir ders, kendinden ÖNCEKİ ders
+// gerçekten tamamlanmadan (kalıcı childProfile.pythonProgress'te 'completed')
+// dropdown'da HİÇ görünmez. Böylece çocuk zorluk sırasını atlayıp doğrudan
+// en zor derse geçemez - her ders bir öncekinin üzerine inşa edilir.
+// ---------------------------------------------------------------
+let pythonProgressCache = {};
+
+async function refreshPythonProgress() {
+  try { pythonProgressCache = (await window.ogretmenAPI.getPythonProgress()) || {}; }
+  catch (e) { pythonProgressCache = {}; }
+}
+
+function isPythonLessonCompleted(id) {
+  return Boolean(pythonProgressCache[id] && pythonProgressCache[id].completed);
+}
+
+// İlk kilitli derste durur - zincir kırılırsa (b öncekini atlayıp ilerisi
+// tamamlanmışsa, olmamalı ama) sonrasını göstermeyiz.
+function unlockedPythonLessons() {
+  const result = [];
+  for (const lesson of PYTHON_LESSONS) {
+    result.push(lesson);
+    if (!isPythonLessonCompleted(lesson.id)) break;
+  }
+  return result;
+}
+
+function renderPythonLessonOptions(preferredId) {
+  const unlocked = unlockedPythonLessons();
+  const selectedId = (preferredId && unlocked.some((l) => l.id === preferredId))
+    ? preferredId
+    : unlocked[unlocked.length - 1].id; // varsayilan: siradaki (en son acilan) ders
+  pythonLessonSelect.innerHTML = '';
+  unlocked.forEach((l) => {
+    const opt = document.createElement('option');
+    opt.value = l.id;
+    const doneMark = isPythonLessonCompleted(l.id) ? '✅ ' : '';
+    opt.innerText = doneMark + pythonLessonText(l, 'name');
+    pythonLessonSelect.appendChild(opt);
+  });
+  pythonLessonSelect.value = selectedId;
+  return selectedId;
+}
 
 function setPythonOutput(text) { pythonOutput.textContent = text; }
 
@@ -1005,7 +787,11 @@ function loadPythonLesson(id) {
 }
 
 pythonLessonSelect.addEventListener('change', () => loadPythonLesson(pythonLessonSelect.value));
-loadPythonLesson(PYTHON_LESSONS[0].id);
+
+(async () => {
+  await refreshPythonProgress();
+  loadPythonLesson(renderPythonLessonOptions());
+})();
 
 // Python Modu'na ilk kez girildiginde (ya da ilk Calistir'a basildiginda)
 // cagrilir - zaten kuruluysa aninda basarili doner (main.js: isPythonReady()).
@@ -1026,21 +812,9 @@ async function ensurePythonReadyOnce() {
   return true;
 }
 
-blockModeTabBtn.addEventListener('click', () => {
-  currentMode = 'blockly';
-  blockModeTabBtn.classList.add('active');
-  pythonModeTabBtn.classList.remove('active');
-  blockModePanel.style.display = '';
-  pythonArea.style.display = 'none';
-});
-pythonModeTabBtn.addEventListener('click', async () => {
-  currentMode = 'python';
-  pythonModeTabBtn.classList.add('active');
-  blockModeTabBtn.classList.remove('active');
-  blockModePanel.style.display = 'none';
-  pythonArea.style.display = 'flex';
-  await ensurePythonReadyOnce();
-});
+// Tek mod (Python) - acilista dogrudan hazirlik kontrolu yapilir (eskiden
+// SADECE Python sekmesine tiklaninca calisirdi, artik baska sekme yok).
+ensurePythonReadyOnce();
 
 pythonRunBtn.addEventListener('click', async () => {
   const code = pythonCodeInput.value;
@@ -1062,7 +836,21 @@ pythonRunBtn.addEventListener('click', async () => {
     const out = (result.stdout || '').trim();
     setPythonOutput(out || uiText('pythonRanEmptyOk'));
     report = out ? `${uiText('pythonRanOk')} ${out}` : uiText('pythonRanEmptyOk');
-    window.ogretmenAPI.reportPythonProgress(currentPythonLesson.id, 'completed');
+    const wasAlreadyCompleted = isPythonLessonCompleted(currentPythonLesson.id);
+    await window.ogretmenAPI.reportPythonProgress(currentPythonLesson.id, 'completed');
+    // GERCEKTEN eklendi (2026-09-11, "görevlerin seviyesi yaptıkça artsın") -
+    // bu ders İLK kez tamamlandiysa bir sonraki ders KİLİDİ açılır, çocuğa
+    // bunu hemen belli et ve dropdown'i yenile.
+    if (!wasAlreadyCompleted) {
+      await refreshPythonProgress();
+      const unlocked = unlockedPythonLessons();
+      const stillOnLast = unlocked[unlocked.length - 1].id === currentPythonLesson.id;
+      renderPythonLessonOptions(currentPythonLesson.id);
+      if (!stillOnLast) {
+        const nextLesson = unlocked[unlocked.length - 1];
+        addMessage('🎉 ' + pythonLessonText(nextLesson, 'name'), 'system');
+      }
+    }
   } else {
     const err = (result.stderr || '').trim();
     setPythonOutput(err);
@@ -1162,6 +950,7 @@ async function startVoiceMode() {
   voiceModeOn = true;
   micBtn.title = uiText('micBtnStopTitle');
   micBtn.innerText = uiText('micBtnStop');
+  setVoiceUiMode(true);
   stopWakeListener();
   await startListening();
 }
@@ -1170,6 +959,7 @@ function stopVoiceMode() {
   voiceModeOn = false;
   micBtn.title = uiText('micBtnStartTitle');
   micBtn.innerText = uiText('micBtnStart');
+  setVoiceUiMode(false);
   stopListening();
   window.speechSynthesis.cancel(); // Chromium sesi calisiyorsa durdur
   // Not: Piper ile calan bir <audio> varsa o kendi akisinda biter;

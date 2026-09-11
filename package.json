@@ -1,6 +1,6 @@
 {
   "name": "ogretmen-ai",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "8 yas grubu icin sesli/yazili blok-kodlama ogretmeni AI - temel iskelet",
   "main": "main.js",
   "scripts": {
@@ -14,7 +14,7 @@
   "license": "MIT",
   "devDependencies": {
     "electron": "^31.0.0",
-    "electron-builder": "^26.15.3",
+    "electron-builder": "^26.16.1",
     "nsis": "^0.0.0"
   },
   "build": {
@@ -29,6 +29,9 @@
       "piper/**/*",
       "assets/**/*",
       "package.json"
+    ],
+    "asarUnpack": [
+      "piper/**/*"
     ],
     "win": {
       "target": [

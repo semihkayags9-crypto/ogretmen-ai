@@ -7,8 +7,23 @@ node_modules/
 # Derleme ciktilari
 dist/
 
-# Piper ikili dosyalari (buyuk, ayrica indirilir)
+# Piper ikili dosyalari (buyuk, ayrica indirilir - bkz. main.js "PIPER TTS
+# ENTEGRASYONU" yorumundaki manuel kurulum adimlari). 2026-09-11: Windows
+# resmi piper zip'i (piper.exe + DLL'ler + espeak-ng-data + ort dosyasi)
+# TAMAMEN buraya dahil - repo'yu ~90MB buyutmemek icin hicbiri commitlenmez.
 piper/piper
 piper/piper.exe
+piper/piper_phonemize
+piper/piper_phonemize.dll
+piper/espeak-ng
+piper/espeak-ng.dll
+piper/espeak-ng-data/
+piper/libespeak-ng.so*
+piper/libonnxruntime.so*
+piper/libpiper_phonemize.so*
+piper/libtashkeel_model.ort
+piper/onnxruntime.dll
+piper/onnxruntime_providers_shared.dll
+piper/pkgconfig/
 piper/models/*.onnx
 piper/models/*.onnx.json

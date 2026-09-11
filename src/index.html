@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<title>Öğretmen AI - Blok Kodlama</title>
+<title>Öğretmen AI - Python Kodlama</title>
 <style>
   body {
     margin: 0;
@@ -11,105 +11,12 @@
     display: flex;
     height: 100vh;
   }
-  #blocklyArea {
+  #codeArea {
     flex: 2;
     min-width: 0;
     display: flex;
     flex-direction: column;
     border-right: 2px solid #dbe3ee;
-  }
-  #blocklyDiv {
-    /* Tüm blokların rahatça görünebilmesi için bu alana öncelik ver. */
-    flex: 1 1 360px;
-    min-height: 340px;
-  }
-  #templateBar {
-    padding: 8px 10px;
-    background: #eef2f9;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    border-bottom: 1px solid #dbe3ee;
-  }
-  #templateBar label { font-size: 14px; color: #445; }
-  #templateSelect {
-    flex: 1;
-    padding: 6px 8px;
-    border-radius: 6px;
-    border: 1px solid #ccd;
-    font-size: 14px;
-  }
-  #runBar {
-    padding: 10px;
-    background: #ffffff;
-    display: flex;
-    gap: 10px;
-    align-items: center;
-  }
-  #runBar button {
-    padding: 10px 18px;
-    font-size: 16px;
-    border: none;
-    border-radius: 8px;
-    background: #4CAF50;
-    color: white;
-    cursor: pointer;
-  }
-  #runBar button:disabled {
-    background: #a9d3ac;
-    cursor: not-allowed;
-  }
-  #stageWrap {
-    background: #1b2a3a;
-    display: flex;
-    flex-direction: column;
-    /* Sahne alanı küçülebilir; blok kutusu sıkışmaz. */
-    flex: 0 1 420px;
-    min-height: 340px;
-    overflow: hidden;
-  }
-  #stageCanvas {
-    display: block;
-    height: 320px;
-    width: auto;
-    max-width: calc(100% - 20px);
-    margin: 6px auto;
-    background: #24384e;
-    border-radius: 10px;
-  }
-  #stageMsg {
-    text-align: center;
-    color: #ffd76b;
-    font-size: 15px;
-    font-weight: 600;
-    min-height: 20px;
-    padding-bottom: 8px;
-  }
-  #stageLog {
-    color: #7fffb0;
-    font-family: 'Consolas', monospace;
-    font-size: 13px;
-    padding: 4px 12px 8px;
-    max-height: 42px;
-    overflow-y: auto;
-  }
-  #modeTabBar {
-    display: flex;
-    background: #24344c;
-  }
-  #modeTabBar button {
-    flex: 1;
-    padding: 10px;
-    border: none;
-    background: transparent;
-    color: #aebdd2;
-    font-size: 14px;
-    cursor: pointer;
-  }
-  #modeTabBar button.active {
-    background: #eef2f9;
-    color: #1b2a3a;
-    font-weight: bold;
   }
   #pythonArea {
     flex: 1;
@@ -279,6 +186,22 @@
     overflow-y: auto;
     padding: 12px;
   }
+  /* GERCEKTEN istendi (2026-09-11, Semih: "sesli konusmaya gectigimizde
+     mesajlarin gorunmemesini sagla... sesi kapatinca yazili olarak
+     gorulebilir ama konusurken degil") - mesajlar DOM'dan silinmiyor,
+     sadece gizleniyor, bu yuzden mod kapaninca TUM sesli sohbet gecmisi
+     otomatik geri gelir. */
+  #chatLog.voice-hidden { display: none; }
+  #teacherBubble.voice-hidden { visibility: hidden; }
+  #voiceWaveWrap {
+    display: none;
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+  }
+  #voiceWaveWrap.active { display: flex; }
+  #voiceWaveCanvas { width: 100%; max-width: 420px; height: 80px; }
   .msg { margin-bottom: 10px; line-height: 1.4; }
   .msg.user { text-align: right; color: #1a4fbf; }
   .msg.ai { text-align: left; color: #1a7a3c; }
@@ -330,28 +253,8 @@
 </head>
 <body>
 
-  <div id="blocklyArea">
-    <div id="modeTabBar">
-      <button id="blockModeTabBtn" type="button" class="active">🧱 Blok Modu</button>
-      <button id="pythonModeTabBtn" type="button">🐍 Python Modu</button>
-    </div>
-    <div id="blockModePanel">
-      <div id="templateBar">
-        <label for="templateSelect">🗺️ Şablon:</label>
-        <select id="templateSelect"></select>
-      </div>
-      <div id="blocklyDiv"></div>
-      <div id="runBar">
-        <button id="runBtn">▶ Çalıştır</button>
-        <span id="runHint">Blokları sürükleyip bırak, sonra Çalıştır'a bas!</span>
-      </div>
-      <div id="stageWrap">
-        <canvas id="stageCanvas" width="480" height="360"></canvas>
-        <div id="stageMsg"></div>
-        <div id="stageLog"></div>
-      </div>
-    </div>
-    <div id="pythonArea" style="display:none">
+  <div id="codeArea">
+    <div id="pythonArea">
       <div id="pythonLessonBar">
         <label for="pythonLessonSelect">🐍 Ders:</label>
         <select id="pythonLessonSelect"></select>
@@ -373,6 +276,7 @@
       <div id="teacherBubble"><span id="teacherName">Aven</span><p id="teacherSpeech">Merhaba! Birlikte kodlamayı öğrenelim.</p></div>
     </section>
     <div id="chatLog"></div>
+    <div id="voiceWaveWrap"><canvas id="voiceWaveCanvas" width="420" height="80"></canvas></div>
     <div id="chatInputBar">
       <button id="micBtn" title="Aven ile sesli konuşmayı başlat">🎤 Konuş</button>
       <input id="chatInput" type="text" placeholder="Bir şey sor..." />
@@ -394,10 +298,6 @@
     </form>
   </dialog>
 
-  <!-- Blockly (CDN uzerinden - internet gerektirir; offline kullanim icin
-       Blockly dosyalarini indirip yerel /vendor klasorune koyup buradaki
-       src'leri yerel yola cevirebilirsin) -->
-  <script src="https://unpkg.com/blockly/blockly.min.js"></script>
   <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
   <script src="renderer.js"></script>
 </body>
