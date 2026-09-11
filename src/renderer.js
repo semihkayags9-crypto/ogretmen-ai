@@ -601,52 +601,62 @@ const PYTHON_LESSONS = [
     starterCode: 'yas = 8\nprint(yas + 1)'
   },
   {
-    id: 'metin-birlestir',
-    name: '4) Metinleri Birleştir',
-    nameEn: '4) Join Two Words',
-    hint: '"Ali" ve "Kaya" yerine kendi adını/soyadını yaz, ne olduğunu gör.',
-    hintEn: 'Change "Ali" and "Kaya" to your own name, see what happens.',
-    starterCode: 'ad = "Ali"\nsoyad = "Kaya"\nprint(ad + " " + soyad)'
-  },
-  {
     id: 'tekrar-et',
-    name: '5) Tekrar Et',
-    nameEn: '5) Repeat It',
+    name: '4) Tekrar Et',
+    nameEn: '4) Repeat It',
     hint: '5 sayısını değiştir, "Merhaba!" kaç kere yazdırıldığına bak.',
     hintEn: 'Change the number 5, see how many times "Merhaba!" gets printed.',
     starterCode: 'for i in range(5):\n    print("Merhaba!")'
   },
   {
     id: 'eger',
-    name: '6) Eğer',
-    nameEn: '6) If',
+    name: '5) Eğer',
+    nameEn: '5) If',
     hint: 'Yaşı değiştirip her iki durumu da dene (8\'den küçük ve büyük).',
     hintEn: 'Change the age and try both cases (under and over 8).',
     starterCode: 'yas = 8\nif yas >= 8:\n    print("Kodlamaya hazırsın!")\nelse:\n    print("Neredeyse hazırsın!")'
   },
   {
     id: 'carpim-tablosu',
-    name: '7) Çarpım Tablosu',
-    nameEn: '7) Multiplication Table',
+    name: '6) Çarpım Tablosu',
+    nameEn: '6) Multiplication Table',
     hint: '"sayi" değişkenini değiştir, çarpım tablosunun nasıl değiştiğini gör.',
     hintEn: 'Change the "sayi" (number) variable and see how the multiplication table changes.',
     starterCode: 'sayi = 3\nfor i in range(1, 6):\n    print(sayi * i)'
   },
   {
     id: 'ic-ice-tekrar',
-    name: '8) İç İçe Tekrar',
-    nameEn: '8) Nested Repeat',
+    name: '7) İç İçe Tekrar',
+    nameEn: '7) Nested Repeat',
     hint: 'Bu kod TOPLAM kaç kere "Merhaba!" yazdırır? "kat" ya da "adet" sayısını değiştirip dene.',
     hintEn: 'How many times does this print "Merhaba!" in TOTAL? Try changing the "kat" or "adet" numbers.',
     starterCode: 'for kat in range(3):\n    for adet in range(2):\n        print("Merhaba!")'
   },
   {
     id: 'sayac',
-    name: '9) Sayaç — Çift mi Tek mi',
-    nameEn: '9) Counter — Even or Odd',
+    name: '8) Sayaç — Çift mi Tek mi',
+    nameEn: '8) Counter — Even or Odd',
     hint: '1\'den 10\'a kadar her sayı için çift mi tek mi olduğunu yazdırır. Son sayıyı (11) değiştirip dene.',
     hintEn: 'Prints whether each number from 1 to 10 is even or odd. Try changing the last number (11).',
     starterCode: 'for sayi in range(1, 11):\n    if sayi % 2 == 0:\n        print(sayi, "çift")\n    else:\n        print(sayi, "tek")'
+  },
+  // GERCEKTEN duzeltildi (2026-09-11, Semih: "mevcut zaten pc de, bütün
+  // bağlamlar gidecek bu sefer de" - ilk taslakta 'metin-birlestir' YANLISLIKLA
+  // orijinal 9 dersin ORTASINA (3 ile 4 arasina) eklenmisti. unlockedPythonLessons
+  // dizi SIRASINA gore ardisik kilit actigindan, bu, ders 4-9'u ONCEDEN
+  // tamamlamis GERCEK bir cocugu (yegen) yeni eklenen bu TEK derste "kilitli"
+  // gosterip GERIYE dondururdu - ilerleme verisi (childProfile.pythonProgress)
+  // SILINMEZ ama etkin kilit durumu boyle bozulurdu. Bu yuzden YENI derslerin
+  // HEPSI orijinal 9'un (1-8, sayac'a kadar) ARDINDAN eklenir - var olan
+  // ilerlemesi olan hic kimse geriye dogru kilitlenmez, sadece yeni icerik
+  // ONCEKI EN SON tamamlanan dersin devami olarak acilir.
+  {
+    id: 'metin-birlestir',
+    name: '9) Metinleri Birleştir',
+    nameEn: '9) Join Two Words',
+    hint: '"Ali" ve "Kaya" yerine kendi adını/soyadını yaz, ne olduğunu gör.',
+    hintEn: 'Change "Ali" and "Kaya" to your own name, see what happens.',
+    starterCode: 'ad = "Ali"\nsoyad = "Kaya"\nprint(ad + " " + soyad)'
   },
   {
     id: 'listeyle-tanis',
